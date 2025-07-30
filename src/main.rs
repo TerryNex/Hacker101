@@ -1,7 +1,12 @@
 #![feature(slice_range)]
 #![feature(ascii_char)]
+#![feature(concat_bytes)]
+
+mod ecb_cbc_detection;
 
 
+use std::collections::HashMap;
+use std::collections::HashSet;
 use aes::cipher::KeyInit;
 #[warn(unused_imports, unused_variables)]
 
@@ -12,9 +17,79 @@ use rand::Rng;
 use std::error::Error;
 use std::ops::Range;
 
+fn detect_block_size(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8]) -> usize {
+    let mut prev_len = encrypt(&[], key).len();
+    for i in 1..=32 {
+        let input = vec![b'A'; i];
+        let curr_len = encrypt(&input, key).len();
+        if curr_len > prev_len {
+            return curr_len - prev_len;
+        }
+        prev_len = curr_len;
+    }
+    panic!("Block size not detected");
+}
 
+fn is_ecb(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8], block_size: usize) -> bool {
+    let input = vec![b'A'; block_size * 2];
+    let encrypted = encrypt(&input, key);
+    encrypted[..block_size] == encrypted[block_size..2 * block_size]
+}
+
+fn crack_unknown_string(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8], block_size: usize) -> Vec<u8> {
+    let target = encrypt(&[], key);
+    println!("Target ciphertext: {:?}", target);
+    if target.is_empty() {
+        println!("Error: unknown-string is empty or encrypt function returned no data");
+        return Vec::new();
+    }
+
+    let mut unknown_string = Vec::new();
+    for pos in 0..target.len() {
+        let input_len = block_size - 1 - (pos % block_size);
+        let mut input = vec![b'A'; input_len];
+        let target_block = &target[(pos / block_size) * block_size..(pos / block_size + 1) * block_size];
+        println!("Position: {}, Input: {:?}", pos, input);
+
+        let mut dict = HashMap::new();
+        for i in 0..=255 {
+            let mut test_input = input.clone();
+            test_input.extend_from_slice(&unknown_string);
+            test_input.push(i);
+            if test_input.len() != block_size {
+                println!("Error: test_input length is {}, expected {}", test_input.len(), block_size);
+                continue;
+            }
+            let encrypted = encrypt(&test_input, key);
+            println!("Test input: {:?}, Encrypted block: {:?}", test_input, &encrypted[..block_size]);
+            dict.insert(encrypted[..block_size].to_vec(), i);
+        }
+        println!("Target block: {:?}", target_block);
+
+        if let Some(&byte) = dict.get(target_block) {
+            unknown_string.push(byte);
+            println!("Found byte: {} ('{}')", byte, byte as char);
+        } else {
+            println!("No match found at position {}", pos);
+            break;
+        }
+    }
+
+   unknown_string
+}
 fn main() {
-    let key = [0; 16];
+    let key = b"YELLOW SUBMARINE";
+    let block_size = detect_block_size(ecb_encrypt, key);
+    println!("Detected block size: {}", block_size);
+
+    let is_ecb = is_ecb(ecb_encrypt, key, block_size);
+    println!("Is ECB mode: {}", is_ecb);
+
+    if is_ecb {
+        let unknown_string = crack_unknown_string(ecb_encrypt, key, block_size);
+        println!("Cracked string: {:?}", String::from_utf8_lossy(&unknown_string));
+    }
+
 }
 
 
@@ -194,9 +269,7 @@ mod tests_crypto_challenge_set_1 {
         //     .await
         //     .expect("Failed to read response text");
         let hex_string: String = fs::read_to_string("data/4.txt")
-            .expect("Failed to read file")
-            .lines()
-            .collect();
+            .expect("Failed to read file");
         println!("Character length: {}", hex_string.len());
         println!("Lines: {}", hex_string.lines().count());
         // Character length: 19944
@@ -228,9 +301,8 @@ mod tests_crypto_challenge_set_1 {
         }
         println!("Best Key: {:02x}", best_key);
         println!(
-            "Best Decrypted(length:{}): {:?}",
-            best_decrypted.len(),
-            best_decrypted
+            "Best Decrypted(length:{})",
+            best_decrypted.len()
         );
         println!(
             "Best Decrypted String: {}",
@@ -540,6 +612,7 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
         let plaintext = b"I'm back and I'm ringin' the bellaabbccddeeff".to_vec();
         let cipher = aes::Aes128Enc::new_from_slice(key).expect("Failed to create cipher");
         let mut buffer = vec![0u8; plaintext.len() + 16 - (plaintext.len() % 16)];
+
         let encrypted = cipher.encrypt_padded_b2b::<Pkcs7>(&plaintext, &mut buffer).unwrap();
         println!("Encrypted: {:?}", encrypted);
         let hex_string: String = encrypted.iter().map(|byte| format!("{:02x}", byte)).collect();
@@ -551,16 +624,77 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
     /// the problem with ECB is that it is stateless and deterministic; the same 16 byte plaintext block will always produce the same 16 byte ciphertext.
     fn test_aes_ecb_mode() {
         let hex_string = fs::read_to_string("data/8.txt").expect("Failed to read file");
-        let blocks: Vec<&[u8]> = hex_string.as_bytes().chunks(16).collect();
-        let mut unique_blocks: HashSet<&[u8]> = HashSet::new();
-        for block in &blocks {
-            if !unique_blocks.insert(block) {
-                println!("Repeated block found: {:?}", block);
+        if ecb_cbc_detection(&hex_string.as_bytes()){
+            println!("ECB mode detected in the given hex string.");
+        } else {
+            println!("No ECB mode detected in the given hex string.");
+        };
+        // let blocks: Vec<&[u8]> = hex_string.as_bytes().chunks(16).collect();
+        // let mut unique_blocks: HashSet<&[u8]> = HashSet::new();
+        // for block in &blocks {
+        //     if !unique_blocks.insert(block) {
+        //         println!("Repeated block found: {:?}", block);
+        //     }
+        // }
+        // if unique_blocks.len() < blocks.len() {
+        //     println!("Likely ECB mode: detected repeated ciphertext blocks");
+        // }
+
+    }
+    #[test]
+    /// this test might fail because the strings are not long enough to detect ECB mode
+    fn test_ecb_cbc_detection() {
+        fn generate_random_key()->[u8;16]
+        {
+            let mut rng = rand::rng();
+            let mut key = [0u8; 16];
+            rng.fill(&mut key);
+            key
+        }
+        fn generate_random_string()-> String {
+            let mut rng = rand::rng();
+            let length = rng.random_range(5..10);
+            let chars: Vec<char> = (0..length).map(|_| rng.random_range('a'..='z')).collect();
+            chars.into_iter().collect()
+        }
+        let repeat_times = 100;
+        let mut result = 0;
+        let mut rng = rand::rng();
+
+        for i in 0..repeat_times {
+            let key = generate_random_key();
+            let appended_prefix = generate_random_string();
+            let appended_suffix = generate_random_string();
+
+            let mut plainttext = Vec::new();
+            let input = b"Hello, World!";
+            plainttext.extend_from_slice(appended_prefix.as_bytes());
+            plainttext.extend_from_slice(input);
+            plainttext.extend_from_slice(appended_suffix.as_bytes());
+            let padded = super::pkcs7_pad(plainttext.as_slice(), 16);
+            let mut encrypted = Vec::new();
+            let mode_choice: bool = rng.random_bool(0.5);
+            if  mode_choice {
+                // ECB mode
+                encrypted = super::ecb_encrypt(padded.as_slice(), &key);
+            }else{
+                // CBC mode
+                let iv = generate_random_key();
+                encrypted = super::cbc_encrypt(padded.as_slice(), &key, &iv);
             }
+
+            // true if ECB mode is detected
+            if  mode_choice && super::ecb_cbc_detection(&encrypted)
+            || !mode_choice && !super::ecb_cbc_detection(&encrypted) {
+                result += 1;
+            }
+
         }
-        if unique_blocks.len() < blocks.len() {
-            println!("Likely ECB mode: detected repeated ciphertext blocks");
-        }
+
+        // percentage of ECB mode detection
+        let percentage = (result as f64 / repeat_times as f64) * 100.0;
+        println!("ECB mode detected in {}% of the cases", percentage);
+        assert!(percentage > 80.0, "ECB mode detection failed");
     }
 }
 
@@ -802,16 +936,45 @@ mod tests_crypto_challenge_2 {
 
 
     #[test]
+    /// 1. 確定區塊大小（Block Size）：
+    /// - 輸入越來越長的相同字符（例如 "A"、"AA"、"AAA" 等），觀察加密後的密文長度變化。
+    /// - 當密文長度突然增加 16 字節時，說明區塊大小是 16 字節（AES-128 的標準區塊大小）。
+    /// 2. 確認 ECB 模式：
+    /// - 輸入 32 個相同字符（例如 32 個 "A"），檢查密文的前兩個 16 字節區塊是否相同。
+    /// - 如果相同，證明是 ECB 模式，因為 ECB 對相同的明文區塊總是產生相同的密文區塊。
+    /// 3. 構造一個少一字節的輸入：
+    /// - 假設區塊大小是 16 字節，輸入 15 個 "A"，這樣加密的第一個 16 字節區塊會是 AAAAAAAAAAAAAAA || X，其中 X 是 unknown-string 的第一個字節。
+    /// 4. 建立字典：
+    /// - 構造 256 個輸入，形式為 AAAAAAAAAAAAAAA || b，其中 b 是從 0x00 到 0xFF 的每個可能字節。
+    /// - 將這些輸入送入 oracle，記錄每個輸入對應的第一個 16 字節密文區塊，形成一個字典 {密文: b}。
+    /// 5. 匹配第一個字節：
+    /// - 將第 3 步的密文與字典比較，找到匹配的密文，從而得知 X 是哪個字節。
+    /// 6. 重複破解下一個字節：
+    /// - 知道第一個字節 X 後，輸入 14 個 "A" 加上 X（即 AAAAAAAAAAAAAAX），讓第一個區塊變成 AAAAAAAAAAAAAAX || Y，其中 Y 是第二個字節。
+    /// - 重複第 4、5 步，構造新字典，找出 Y，依此類推，直到解出整個 unknown-string。
     fn test_ecb_encrypt_decrypt_block() {
         let key = b"YELLOW SUBMARINE";
         let plaintext = b"this is a test message 112233 aabbcc !@#$%^&*()_+";
         let padded_plaintext = super::pkcs7_pad(plaintext, 16);
         println!("Padded Plaintext: {:?}", padded_plaintext);
-        let encrypted = super::ecb_encrypt_block(&padded_plaintext, key);
+        let encrypted = super::ecb_encrypt(&padded_plaintext, key);
         println!("Encrypted: {:?}", encrypted);
-        let decrypted = super::ecb_decrypt_block(&encrypted, key);
-        println!("Decrypted: {:?}", decrypted);
-        assert_eq!(decrypted, padded_plaintext);
+        let decrypted = super::ecb_decrypt(&encrypted, key);
+        let unpadded_decrypted = super::pkcs7_unpad(&decrypted);
+        println!("Decrypted: {:?}", String::from_utf8_lossy(&unpadded_decrypted));
+        assert_eq!(unpadded_decrypted, plaintext);
+
+        println!("is ECB mode: {}", super::ecb_cbc_detection(&encrypted));
+
+        // 測試加密的長度 32 個相同字節
+        // 會出現重複的密文塊
+        // [228, 64, 133, 250, 43, 218, 51, 216, 106, 163, 64, 180, 193, 108, 5, 173,
+        // 228, 64, 133, 250, 43, 218, 51, 216, 106, 163, 64, 180, 193, 108, 5, 173, 96, 250, 54, 112, 126, 69, 244, 153, 219, 160, 242, 91, 146, 35, 1, 165]
+        let test_plaintext = super::pkcs7_pad(b"AAAAAAAAAAAAAAA", 16);
+
+        let encrypted_test = super::ecb_encrypt(&test_plaintext, key);
+        let encrypted_len = encrypted_test.len();
+        println!("Encrypted Test len {:?}: {:?}", encrypted_len,encrypted_test);
     }
 
 
@@ -834,9 +997,9 @@ mod tests_crypto_challenge_2 {
             let encrypted = super::cbc_encrypt_block(&xored, key);
             prev = encrypted.clone();
             buffer_blocks.extend_from_slice(&encrypted);
-            println!("Encrypted Block: {:?}", encrypted);
+            // println!("Encrypted Block: {:?}", encrypted);
         }
-        println!("CBC Encrypted Data: {:?}", buffer_blocks);
+        // println!("CBC Encrypted Data: {:?}", buffer_blocks);
     }
 
 
@@ -885,7 +1048,7 @@ mod tests_crypto_challenge_2 {
         let iv = [0u8; BLOCK_SIZE]; // 128-bit IV
 
         let encrypted= super::cbc_encrypt(&padded_data, key, &iv);
-            println!("CBC Encrypted Data: {:?}", encrypted);
+            // println!("CBC Encrypted Data: {:?}", encrypted);
     }
 
 
@@ -897,8 +1060,7 @@ mod tests_crypto_challenge_2 {
     /// retult:`I'm back and I'm ...`
     fn test_cbc_mode() {
         let data = fs::read_to_string("data/10.txt")
-            .expect("Failed to read file").lines().collect::<String>()
-            ;
+            .expect("Failed to read file").lines().collect::<String>();
         let data = base64::decode(
             data
         )
@@ -910,38 +1072,127 @@ mod tests_crypto_challenge_2 {
         let decrypted = super::cbc_decrypt(&data, key, &iv);
         println!("CBC Encrypted Data: {}", String::from_utf8_lossy(&pkcs7_unpad(&decrypted)));
     }
+
+    #[test]
+    /// `Challenge 12
+    /// Byte-at-a-time ECB decryption (Simple)
+    fn test_oracle_ecb_decrypt() {
+        let key = b"YELLOW SUBMARINE";
+        let mut encrypted = Vec::new();
+        let plaintext_prefix = base64::Engine::decode(&super::engine, "Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkgaGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBqdXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUgYnkK").expect("REASON");
+
+        let plaintext =  [plaintext_prefix.as_slice(),b" this is a test message 112233 aabbcc !@#$%^&*()_+"].concat();
+        let padded_plaintext = super::pkcs7_pad(&plaintext, 16);
+        encrypted.extend(super::ecb_encrypt(&padded_plaintext, key));
+        println!("Encrypted: {:?}", encrypted);
+
+        let decrypted = super::ecb_decrypt(&encrypted, key);
+        println!("Decrypted: {:?} , {}", decrypted, String::from_utf8(decrypted.clone()).unwrap());
+        assert_eq!(decrypted, padded_plaintext);
+
+
+        // 測試逆向
+        let bytes= b"AAAAAAAAAAAAAAA";
+        let mut result = [0u8;16];
+        result[..15].copy_from_slice(bytes);
+        let compare = super::ecb_encrypt(&result, key);
+        let mut a:Vec<Vec<u8>> = Vec::new();
+        let mut b: Vec<u8>  = Vec::new();
+        for i in 0..=255 {
+            result[15] = i;
+            println!("Testing byte: {:?}", &result);
+            let encrypted = super::ecb_encrypt(&result, key);
+            println!("Encrypted: {:?}", &encrypted);
+            a.push(encrypted[..16].to_vec());
+            // if encrypted == encrypted[..16] {
+            //     println!("Found byte: {}", i);
+            //     break;
+            // }
+        }
+        println!("Encrypted Bytes: {:?}", a);
+        println!("Compare: {:?}", compare);
+        for (i,v) in a.iter().enumerate() {
+            if v == &compare[..16] {
+                println!(" found byte: {}", i);
+                break;
+            }
+        }
+    }
 }
 
 
 /// BLOCK_SIZE=16
 fn ecb_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
+    assert_eq!(block.len(), 16, "Block must be exactly 16 bytes for AES");
+
     let cipher = aes::Aes128Enc::new_from_slice(key).expect("Failed to create cipher");
-    let mut buffer = vec![0u8; block.len() + 16 - (block.len() % 16)];
-    let encrypted = cipher.encrypt_padded_b2b::<Pkcs7>(&block, &mut buffer).unwrap();
-    // println!("Encrypted: {:?}", encrypted);
-    let hex_string: String = encrypted.iter().map(|byte| format!("{:02x}", byte)).collect();
-    // println!("Ciphertext Hex: {}", hex_string);
-    return encrypted.to_vec();
+    let mut block_copy = block.to_vec();
+
+    // Encrypt the 16-byte block directly
+    for chunk in block_copy.chunks_mut(16) {
+        let mut block_array = [0u8; 16];
+        block_array.copy_from_slice(chunk);
+        cipher.encrypt_block((&mut block_array).into());
+        chunk.copy_from_slice(&block_array);
+    }
+
+    block_copy
+}
+fn ecb_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
+    let unknown_string = b"longer secret message";
+    let data = pkcs7_pad(&[data, unknown_string].concat(),16);
+    let mut encrypted = Vec::new();
+    for block in  data.chunks(16) {
+
+        if block.len() == 16 {
+            encrypted.extend(ecb_encrypt_block(block, key));
+        } else {
+            // This shouldn't happen if data is properly padded
+            panic!("Data must be padded to 16-byte blocks before ECB encryption");
+        }
+    }
+    encrypted
 }
 
 
 /// BLOCK_SIZE=16
 fn ecb_decrypt_block(mut block: &[u8], key: &[u8]) -> Vec<u8> {
     let cipher = aes::Aes128Dec::new_from_slice(key).expect("Failed to create cipher");
-    let mut buffer = vec![0u8; block.len() + 16 - (block.len() % 16)];
+    let mut block_copy = block.to_vec();
+    // Decrypt without unpadding first
+    for chunk in block_copy.chunks_mut(16) {
+        if chunk.len() == 16 {
+            let mut block_array = [0u8; 16];
+            block_array.copy_from_slice(chunk);
+            cipher.decrypt_block((&mut block_array).into());
+            chunk.copy_from_slice(&block_array);
+        }
+    }
+    block_copy
+}
+fn ecb_decrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
+    let mut decrypted = Vec::new();
+    for block in data.chunks(16) {
 
-    let decrypted = cipher.decrypt_padded_b2b::<Pkcs7>(&block, &mut buffer).unwrap();
-    // println!("Decrypted: {}", String::from_utf8_lossy(&decrypted));
-    return decrypted.to_vec();
+        let decrypted_block = ecb_decrypt_block(block, key);
+        decrypted.extend_from_slice(&decrypted_block);
+    }
+    decrypted
+
 }
 
 
 /// 對輸入數據進行 PKCS#7 填充，返回填充後的數據
 fn pkcs7_pad(data: &[u8], block_size: usize) -> Vec<u8> {
+    println!("Data length: {}", data.len());
     let padding_size = block_size - (data.len() % block_size);
-    let mut padded_data = Vec::with_capacity(data.len() + padding_size);
+    if padding_size == block_size || padding_size == 0 {
+        return data.to_vec(); // No padding needed
+    }
+    let mut padded_data = Vec::with_capacity(data.len() );
     padded_data.extend_from_slice(data);
     padded_data.extend(vec![padding_size as u8; padding_size]);
+    println!("Padded Data: {:?}", padded_data.len());
     padded_data
 }
 
@@ -1011,10 +1262,27 @@ fn cbc_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
         let encrypted = cbc_encrypt_block(&xored, key);
         prev = encrypted.clone();
         buffer_blocks.extend_from_slice(&encrypted);
-        println!("Encrypted Block: {:?}", encrypted);
+        // println!("Encrypted Block: {:?}", encrypted);
     }
-    println!("CBC Encrypted Data: {:?}", buffer_blocks);
+    // println!("CBC Encrypted Data: {:?}", buffer_blocks);
     buffer_blocks
 
+
+}
+
+/// 檢測 ECB/CBC 模式
+///
+/// True: ECB
+/// False: CBC
+fn ecb_cbc_detection(data: &[u8]) -> bool {
+    let mut blocks: Vec<&[u8]> = data.chunks(16).collect();
+    let mut unique_blocks: HashSet<&[u8]> = HashSet::new();
+    for block in &blocks {
+        if !unique_blocks.insert(block) {
+            println!("Repeated block found: {:?}", block);
+            return true; // Likely ECB mode
+        }
+    }
+    false
 
 }
