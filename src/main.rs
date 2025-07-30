@@ -38,7 +38,6 @@ fn is_ecb(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8], block_size: usi
 
 fn crack_unknown_string(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8], block_size: usize) -> Vec<u8> {
     let target = encrypt(&[], key);
-    println!("Target ciphertext: {:?}", target);
     if target.is_empty() {
         println!("Error: unknown-string is empty or encrypt function returned no data");
         return Vec::new();
@@ -46,26 +45,40 @@ fn crack_unknown_string(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8], b
 
     let mut unknown_string = Vec::new();
     for pos in 0..target.len() {
+        let block_idx = pos / block_size;
         let input_len = block_size - 1 - (pos % block_size);
-        let mut input = vec![b'A'; input_len];
-        let target_block = &target[(pos / block_size) * block_size..(pos / block_size + 1) * block_size];
-        println!("Position: {}, Input: {:?}", pos, input);
+        let input = vec![b'A'; input_len];
 
+        // 構造字典，嘗試所有可能的最後一個字節
         let mut dict = HashMap::new();
         for i in 0..=255 {
+            // 構造用於生成字典條目的輸入: padding + 已知字符串 + 測試字節
             let mut test_input = input.clone();
             test_input.extend_from_slice(&unknown_string);
             test_input.push(i);
-            if test_input.len() != block_size {
-                println!("Error: test_input length is {}, expected {}", test_input.len(), block_size);
-                continue;
-            }
+            // if test_input.len() != block_size {
+            //     println!("Error: test_input length is {}, expected {}", test_input.len(), block_size);
+            //     continue;
+            // }
+            // 加密並保存結果的前 block_size 字節
             let encrypted = encrypt(&test_input, key);
-            println!("Test input: {:?}, Encrypted block: {:?}", test_input, &encrypted[..block_size]);
+            // println!("Test input: {:?}, Encrypted block: {:?}", test_input, &encrypted[..block_size]);
             dict.insert(encrypted[..block_size].to_vec(), i);
         }
-        println!("Target block: {:?}", target_block);
+        // println!("Target block: {:?}", target_block);
+        // 構造目標輸入：input
+        let target_input = vec![b'A'; input_len];
+        // 獲取目標密文的對應塊
+        let target_encrypted = encrypt(&target_input, key);
+        let target_block_start = block_idx * block_size;
+        let target_block_end = (block_idx + 1) * block_size;
+        if target_block_end > target_encrypted.len() {
+            break; // 已經解密完所有塊
+        }
+        let target_block = &target_encrypted[target_block_start..target_block_end];
 
+        // let target_block = &target[(pos / block_size) * block_size..(pos / block_size + 1) * block_size];
+        println!("Position: {}, Input: {:?}", pos, input);
         if let Some(&byte) = dict.get(target_block) {
             unknown_string.push(byte);
             println!("Found byte: {} ('{}')", byte, byte as char);
@@ -79,14 +92,14 @@ fn crack_unknown_string(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8], b
 }
 fn main() {
     let key = b"YELLOW SUBMARINE";
-    let block_size = detect_block_size(ecb_encrypt, key);
+    let block_size = detect_block_size(ecb_encrypt_unknown_string, key);
     println!("Detected block size: {}", block_size);
 
-    let is_ecb = is_ecb(ecb_encrypt, key, block_size);
+    let is_ecb = is_ecb(ecb_encrypt_unknown_string, key, block_size);
     println!("Is ECB mode: {}", is_ecb);
 
     if is_ecb {
-        let unknown_string = crack_unknown_string(ecb_encrypt, key, block_size);
+        let unknown_string = crack_unknown_string(ecb_encrypt_unknown_string, key, block_size);
         println!("Cracked string: {:?}", String::from_utf8_lossy(&unknown_string));
     }
 
@@ -931,7 +944,6 @@ mod tests_crypto_challenge_2 {
             padded_data
         };
         let padded = fn_pad(data, 20);
-        println!("Padded Data: {:?}", padded);
     }
 
 
@@ -1139,8 +1151,22 @@ fn ecb_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     block_copy
 }
 fn ecb_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
-    let unknown_string = b"longer secret message";
-    let data = pkcs7_pad(&[data, unknown_string].concat(),16);
+
+    let mut encrypted = Vec::new();
+    for block in  data.chunks(16) {
+
+        if block.len() == 16 {
+            encrypted.extend(ecb_encrypt_block(block, key));
+        } else {
+            // This shouldn't happen if data is properly padded
+            panic!("Data must be padded to 16-byte blocks before ECB encryption");
+        }
+    }
+    encrypted
+}
+fn ecb_encrypt_unknown_string(data: &[u8], key: &[u8]) -> Vec<u8> {
+    let unknown_string = base64::Engine::decode(&engine,"Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkgaGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBqdXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUgYnkK");
+    let data = pkcs7_pad(&[data, unknown_string.unwrap().as_slice()].concat(),16);
     let mut encrypted = Vec::new();
     for block in  data.chunks(16) {
 
@@ -1184,7 +1210,6 @@ fn ecb_decrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
 
 /// 對輸入數據進行 PKCS#7 填充，返回填充後的數據
 fn pkcs7_pad(data: &[u8], block_size: usize) -> Vec<u8> {
-    println!("Data length: {}", data.len());
     let padding_size = block_size - (data.len() % block_size);
     if padding_size == block_size || padding_size == 0 {
         return data.to_vec(); // No padding needed
@@ -1192,7 +1217,6 @@ fn pkcs7_pad(data: &[u8], block_size: usize) -> Vec<u8> {
     let mut padded_data = Vec::with_capacity(data.len() );
     padded_data.extend_from_slice(data);
     padded_data.extend(vec![padding_size as u8; padding_size]);
-    println!("Padded Data: {:?}", padded_data.len());
     padded_data
 }
 
