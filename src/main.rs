@@ -2,109 +2,20 @@
 #![feature(ascii_char)]
 #![feature(concat_bytes)]
 
-mod ecb_cbc_detection;
 
-
-use std::collections::HashMap;
-use std::collections::HashSet;
+#[allow(unused_imports)]
+use aes::cipher::block_padding::Pkcs7;
 use aes::cipher::KeyInit;
-#[warn(unused_imports, unused_variables)]
-
-use aes::cipher::{block_padding::Pkcs7, BlockCipherDecrypt, BlockCipherEncrypt, KeyIvInit};
+use aes::cipher::{BlockCipherDecrypt, BlockCipherEncrypt};
 use base64;
 use base64::engine::general_purpose::STANDARD as engine;
-use rand::Rng;
+use std::collections::HashSet;
 use std::error::Error;
 use std::ops::Range;
+#[allow(unused_imports)]
+use rand::Rng;
 
-fn detect_block_size(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8]) -> usize {
-    let mut prev_len = encrypt(&[], key).len();
-    for i in 1..=32 {
-        let input = vec![b'A'; i];
-        let curr_len = encrypt(&input, key).len();
-        if curr_len > prev_len {
-            return curr_len - prev_len;
-        }
-        prev_len = curr_len;
-    }
-    panic!("Block size not detected");
-}
-
-fn is_ecb(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8], block_size: usize) -> bool {
-    let input = vec![b'A'; block_size * 2];
-    let encrypted = encrypt(&input, key);
-    encrypted[..block_size] == encrypted[block_size..2 * block_size]
-}
-
-fn crack_unknown_string(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8], block_size: usize) -> Vec<u8> {
-    let target = encrypt(&[], key);
-    if target.is_empty() {
-        println!("Error: unknown-string is empty or encrypt function returned no data");
-        return Vec::new();
-    }
-
-    let mut unknown_string = Vec::new();
-    for pos in 0..target.len() {
-        let block_idx = pos / block_size;
-        let input_len = block_size - 1 - (pos % block_size);
-        let input = vec![b'A'; input_len];
-
-        // 構造字典，嘗試所有可能的最後一個字節
-        let mut dict = HashMap::new();
-        for i in 0..=255 {
-            // 構造用於生成字典條目的輸入: padding + 已知字符串 + 測試字節
-            let mut test_input = input.clone();
-            test_input.extend_from_slice(&unknown_string);
-            test_input.push(i);
-            // if test_input.len() != block_size {
-            //     println!("Error: test_input length is {}, expected {}", test_input.len(), block_size);
-            //     continue;
-            // }
-            // 加密並保存結果的前 block_size 字節
-            let encrypted = encrypt(&test_input, key);
-            // println!("Test input: {:?}, Encrypted block: {:?}", test_input, &encrypted[..block_size]);
-            dict.insert(encrypted[..block_size].to_vec(), i);
-        }
-        // println!("Target block: {:?}", target_block);
-        // 構造目標輸入：input
-        let target_input = vec![b'A'; input_len];
-        // 獲取目標密文的對應塊
-        let target_encrypted = encrypt(&target_input, key);
-        let target_block_start = block_idx * block_size;
-        let target_block_end = (block_idx + 1) * block_size;
-        if target_block_end > target_encrypted.len() {
-            break; // 已經解密完所有塊
-        }
-        let target_block = &target_encrypted[target_block_start..target_block_end];
-
-        // let target_block = &target[(pos / block_size) * block_size..(pos / block_size + 1) * block_size];
-        println!("Position: {}, Input: {:?}", pos, input);
-        if let Some(&byte) = dict.get(target_block) {
-            unknown_string.push(byte);
-            println!("Found byte: {} ('{}')", byte, byte as char);
-        } else {
-            println!("No match found at position {}", pos);
-            break;
-        }
-    }
-
-   unknown_string
-}
-fn main() {
-    let key = b"YELLOW SUBMARINE";
-    let block_size = detect_block_size(ecb_encrypt_unknown_string, key);
-    println!("Detected block size: {}", block_size);
-
-    let is_ecb = is_ecb(ecb_encrypt_unknown_string, key, block_size);
-    println!("Is ECB mode: {}", is_ecb);
-
-    if is_ecb {
-        let unknown_string = crack_unknown_string(ecb_encrypt_unknown_string, key, block_size);
-        println!("Cracked string: {:?}", String::from_utf8_lossy(&unknown_string));
-    }
-
-}
-
+fn main() {}
 
 #[cfg(test)]
 /// ### Reference: [Crypto Challenge Set 1](https://cryptopals.com/sets/1)
@@ -116,7 +27,6 @@ mod tests_crypto_challenge_set_1 {
     use super::*;
     use aes::cipher::BlockCipherDecrypt;
     use aes::cipher::KeyInit;
-    use std::collections::HashSet;
     use std::fs;
 
 
@@ -157,7 +67,6 @@ mod tests_crypto_challenge_set_1 {
         "I'm killing your brain like a poisonous mushroom"
         */
     }
-
 
     #[test]
     /// XOR combination
@@ -201,7 +110,6 @@ mod tests_crypto_challenge_set_1 {
             .collect();
         println!("XOR Hex: {}", xor_hex);
     }
-
 
     #[test]
     /// 從 hex 字符串中找出單一 byte 0x00~0xFF 當做 key, 被用來加密整段信息
@@ -259,7 +167,6 @@ mod tests_crypto_challenge_set_1 {
         */
     }
 
-
     #[tokio::test]
     /// [test strings](https://cryptopals.com/static/challenge-data/4.txt)
     ///
@@ -281,8 +188,7 @@ mod tests_crypto_challenge_set_1 {
         //     .text()
         //     .await
         //     .expect("Failed to read response text");
-        let hex_string: String = fs::read_to_string("data/4.txt")
-            .expect("Failed to read file");
+        let hex_string: String = fs::read_to_string("data/4.txt").expect("Failed to read file");
         println!("Character length: {}", hex_string.len());
         println!("Lines: {}", hex_string.lines().count());
         // Character length: 19944
@@ -313,16 +219,12 @@ mod tests_crypto_challenge_set_1 {
             }
         }
         println!("Best Key: {:02x}", best_key);
-        println!(
-            "Best Decrypted(length:{})",
-            best_decrypted.len()
-        );
+        println!("Best Decrypted(length:{})", best_decrypted.len());
         println!(
             "Best Decrypted String: {}",
             String::from_utf8(best_decrypted).unwrap()
         );
     }
-
 
     #[test]
     /// 使用 key "ICE" 重複 XOR 加密
@@ -350,7 +252,6 @@ mod tests_crypto_challenge_set_1 {
         println!("Hex String: {}", hex_string);
         // Hex String: 0b363b3f1c373
     }
-
 
     #[tokio::test]
     /// [test strings](https://cryptopals.com/static/challenge-data/6.txt)
@@ -453,7 +354,6 @@ mod tests_crypto_challenge_set_1 {
         );
     }
 
-
     #[test]
     /// this is a pre-test for test [break_repeating_key_xor()](break_repeating_key_xor)
     ///
@@ -469,7 +369,6 @@ mod tests_crypto_challenge_set_1 {
             .sum::<usize>();
         println!("Hamming Distance: {}", distance);
     }
-
 
     #[test]
     /// test transpose blocks
@@ -493,7 +392,6 @@ mod tests_crypto_challenge_set_1 {
         println!("Original Bytes: {:?}", bytes);
         println!("Transposed Blocks: {:?}", bytes_blocks_transposed);
     }
-
 
     #[tokio::test]
     /// this is for varifying the correctness of `break_repeating_key_xor()`
@@ -567,7 +465,7 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
                 .lines()
                 .collect::<String>(),
         )
-            .expect("Failed to decode base64");
+        .expect("Failed to decode base64");
         let keysize_range = 2..40;
         let result = super::break_repeating_key_xor(&bytes, keysize_range);
         if let Ok(decoded) = result.await {
@@ -576,7 +474,6 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
             println!("Failed to break repeating key XOR");
         }
     }
-
 
     #[test]
     /// ### [resources](https://cryptopals.com/static/challenge-data/7.txt)
@@ -593,27 +490,32 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
         // println!("Base64 Decoded: {:?}", base64_string);
         let cipher = aes::Aes128Dec::new_from_slice(key).expect("Failed to decode base64");
 
-        let decrypted = cipher
+        let _decrypted = cipher
             .decrypt_padded::<Pkcs7>(&mut base64_string)
             .expect("Failed to decrypt");
         // println!("Decrypted: {}", String::from_utf8_lossy(&decrypted));
     }
-
 
     #[test]
     /// AES ECB 解密
     /// plaintext: `I'm back and I'm ringin' the bellaabbccddeeff`
     fn aes_ecb_decrypt() {
         let key = b"YELLOW SUBMARINE";
-        let ciphertext = [9, 18, 48, 170, 222, 62, 179, 48, 219, 170, 67, 88, 248, 141, 42, 108, 55, 183, 45, 12, 244, 194, 44, 52, 74, 236, 65, 66, 208, 12, 229, 48, 252, 32, 60, 43, 28, 19, 32, 87, 185, 126, 229, 216, 10, 213, 112, 187].to_vec();
+        let ciphertext = [
+            9, 18, 48, 170, 222, 62, 179, 48, 219, 170, 67, 88, 248, 141, 42, 108, 55, 183, 45, 12,
+            244, 194, 44, 52, 74, 236, 65, 66, 208, 12, 229, 48, 252, 32, 60, 43, 28, 19, 32, 87,
+            185, 126, 229, 216, 10, 213, 112, 187,
+        ]
+        .to_vec();
         println!("Decrypted Bytes: {:?}", ciphertext);
         let cipher = aes::Aes128Dec::new_from_slice(key).expect("Failed to create cipher");
 
         let mut buffer = vec![0u8; ciphertext.len() + 16 - (ciphertext.len() % 16)];
-        let decrypted = cipher.decrypt_padded_b2b::<Pkcs7>(&ciphertext, &mut buffer).unwrap();
+        let decrypted = cipher
+            .decrypt_padded_b2b::<Pkcs7>(&ciphertext, &mut buffer)
+            .unwrap();
         println!("Decrypted: {}", String::from_utf8_lossy(&decrypted));
     }
-
 
     #[test]
     /// aec_ecb encryption
@@ -626,18 +528,22 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
         let cipher = aes::Aes128Enc::new_from_slice(key).expect("Failed to create cipher");
         let mut buffer = vec![0u8; plaintext.len() + 16 - (plaintext.len() % 16)];
 
-        let encrypted = cipher.encrypt_padded_b2b::<Pkcs7>(&plaintext, &mut buffer).unwrap();
+        let encrypted = cipher
+            .encrypt_padded_b2b::<Pkcs7>(&plaintext, &mut buffer)
+            .unwrap();
         println!("Encrypted: {:?}", encrypted);
-        let hex_string: String = encrypted.iter().map(|byte| format!("{:02x}", byte)).collect();
+        let hex_string: String = encrypted
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect();
         println!("Ciphertext Hex: {}", hex_string);
     }
-
 
     #[test]
     /// the problem with ECB is that it is stateless and deterministic; the same 16 byte plaintext block will always produce the same 16 byte ciphertext.
     fn test_aes_ecb_mode() {
         let hex_string = fs::read_to_string("data/8.txt").expect("Failed to read file");
-        if ecb_cbc_detection(&hex_string.as_bytes()){
+        if ecb_cbc_detection(&hex_string.as_bytes()) {
             println!("ECB mode detected in the given hex string.");
         } else {
             println!("No ECB mode detected in the given hex string.");
@@ -652,19 +558,17 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
         // if unique_blocks.len() < blocks.len() {
         //     println!("Likely ECB mode: detected repeated ciphertext blocks");
         // }
-
     }
     #[test]
     /// this test might fail because the strings are not long enough to detect ECB mode
     fn test_ecb_cbc_detection() {
-        fn generate_random_key()->[u8;16]
-        {
+        fn generate_random_key() -> [u8; 16] {
             let mut rng = rand::rng();
             let mut key = [0u8; 16];
             rng.fill(&mut key);
             key
         }
-        fn generate_random_string()-> String {
+        fn generate_random_string() -> String {
             let mut rng = rand::rng();
             let length = rng.random_range(5..10);
             let chars: Vec<char> = (0..length).map(|_| rng.random_range('a'..='z')).collect();
@@ -674,34 +578,36 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
         let mut result = 0;
         let mut rng = rand::rng();
 
-        for i in 0..repeat_times {
+        for _ in 0..repeat_times {
             let key = generate_random_key();
             let appended_prefix = generate_random_string();
             let appended_suffix = generate_random_string();
 
             let mut plainttext = Vec::new();
-            let input = b"Hello, World!";
+            let input = vec![b'A';48]; // need to be long enough to detect ECB mode
             plainttext.extend_from_slice(appended_prefix.as_bytes());
-            plainttext.extend_from_slice(input);
+            plainttext.extend_from_slice(&input);
             plainttext.extend_from_slice(appended_suffix.as_bytes());
-            let padded = super::pkcs7_pad(plainttext.as_slice(), 16);
+            let padded = super::pkcs7_pad(&plainttext, 16);
+            #[allow(unused_assignments)]
             let mut encrypted = Vec::new();
             let mode_choice: bool = rng.random_bool(0.5);
-            if  mode_choice {
+            if mode_choice {
                 // ECB mode
-                encrypted = super::ecb_encrypt(padded.as_slice(), &key);
-            }else{
+                encrypted = super::ecb_encrypt(&padded, &key);
+            } else {
                 // CBC mode
                 let iv = generate_random_key();
-                encrypted = super::cbc_encrypt(padded.as_slice(), &key, &iv);
+                encrypted = super::cbc_encrypt(&padded, &key, &iv);
             }
 
             // true if ECB mode is detected
-            if  mode_choice && super::ecb_cbc_detection(&encrypted)
-            || !mode_choice && !super::ecb_cbc_detection(&encrypted) {
+
+            if mode_choice && super::ecb_cbc_detection(&encrypted)
+                || !mode_choice && !super::ecb_cbc_detection(&encrypted)
+            {
                 result += 1;
             }
-
         }
 
         // percentage of ECB mode detection
@@ -711,7 +617,7 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
     }
 }
 
-
+#[allow(dead_code)]
 /// 計算兩個字節切片之間的 Hamming 距離, 越小越好.
 /// 對比兩個字節切片，計算它們之間不同位元的數量。`(101^110).count_ones() = 2`
 /// Hamming 距離是指兩個字節切片之間不同位元的數量。
@@ -734,7 +640,6 @@ fn hamming_distance(str1: &[u8], str2: &[u8]) -> Result<usize, &'static str> {
         .map(|byte| byte.count_ones() as usize)
         .sum())
 }
-
 
 #[allow(dead_code)]
 async fn single_byte_xor_string(str: String) -> Result<u8, Box<dyn Error>> {
@@ -761,7 +666,6 @@ async fn single_byte_xor_string(str: String) -> Result<u8, Box<dyn Error>> {
     Ok(best_key) // Placeholder for the actual implementation
 }
 
-
 #[allow(dead_code)]
 async fn single_byte_xor_u8(str: Vec<u8>) -> Result<u8, Box<dyn Error>> {
     if str.is_empty() || str.len() < 2 {
@@ -787,7 +691,7 @@ async fn single_byte_xor_u8(str: Vec<u8>) -> Result<u8, Box<dyn Error>> {
     Ok(best_key) // Placeholder for the actual implementation
 }
 
-
+#[allow(dead_code)]
 /// 對輸入的字節數組進行單字節 XOR 解密，返回最佳的 key
 ///
 /// 該函數會嘗試所有可能的 key (0x00 到 0xFF)，並計算每個解密結果的得分，
@@ -822,7 +726,6 @@ async fn single_byte_xor<T: AsRef<[u8]>>(input: T) -> Result<u8, Box<dyn Error>>
     Ok(best_key)
 }
 
-
 /// 將明文與重複的密鑰進行 XOR 操作，返回加密後的字節數組
 ///
 /// 該函數會將明文的每個字節與密鑰的對應字節進行 XOR 操作，密鑰會循環使用。
@@ -839,7 +742,6 @@ fn repeat_key_xor(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
         .map(|(p, k)| p ^ k)
         .collect()
 }
-
 
 /// 將字節數組轉置為 KEYSIZE 個 block
 ///
@@ -859,7 +761,7 @@ fn transpose_blocks(bytes: &[u8], keysize: usize) -> Vec<Vec<u8>> {
         .collect()
 }
 
-
+#[allow(dead_code)]
 /// 嘗試使用重複的密鑰 XOR 解密字節數組，並返回解密後的字節數組
 ///
 /// 這個函數會嘗試不同的 KEYSIZE，計算每個 KEYSIZE 的平均 Hamming 距離，並選擇最佳的 KEYSIZE。
@@ -923,12 +825,11 @@ async fn break_repeating_key_xor(
     Ok(decoded)
 }
 
-
 #[cfg(test)]
 /// [source](https://cryptopals.com/sets/2)
 mod tests_crypto_challenge_2 {
-    use crate::pkcs7_unpad;
-    use aes::cipher::KeyInit;
+    use crate::{ecb_encrypt_unknown_string, pkcs7_unpad};
+    use std::collections::HashMap;
     use std::fs;
 
 
@@ -943,9 +844,8 @@ mod tests_crypto_challenge_2 {
             padded_data.extend(vec![padding_size as u8; padding_size]);
             padded_data
         };
-        let padded = fn_pad(data, 20);
+        let _padded = fn_pad(data, 20);
     }
-
 
     #[test]
     /// 1. 確定區塊大小（Block Size）：
@@ -973,7 +873,10 @@ mod tests_crypto_challenge_2 {
         println!("Encrypted: {:?}", encrypted);
         let decrypted = super::ecb_decrypt(&encrypted, key);
         let unpadded_decrypted = super::pkcs7_unpad(&decrypted);
-        println!("Decrypted: {:?}", String::from_utf8_lossy(&unpadded_decrypted));
+        println!(
+            "Decrypted: {:?}",
+            String::from_utf8_lossy(&unpadded_decrypted)
+        );
         assert_eq!(unpadded_decrypted, plaintext);
 
         println!("is ECB mode: {}", super::ecb_cbc_detection(&encrypted));
@@ -986,9 +889,11 @@ mod tests_crypto_challenge_2 {
 
         let encrypted_test = super::ecb_encrypt(&test_plaintext, key);
         let encrypted_len = encrypted_test.len();
-        println!("Encrypted Test len {:?}: {:?}", encrypted_len,encrypted_test);
+        println!(
+            "Encrypted Test len {:?}: {:?}",
+            encrypted_len, encrypted_test
+        );
     }
-
 
     #[test]
     fn cbc_encrypt() {
@@ -1002,10 +907,7 @@ mod tests_crypto_challenge_2 {
         let mut buffer_blocks: Vec<u8> = Vec::with_capacity(padded_data.len());
 
         for block in padded_data.chunks(BLOCK_SIZE) {
-            let xored: Vec<u8> = block.iter()
-                                      .zip(prev.iter())
-                                      .map(|(b, p)| b ^ p)
-                                      .collect();
+            let xored: Vec<u8> = block.iter().zip(prev.iter()).map(|(b, p)| b ^ p).collect();
             let encrypted = super::cbc_encrypt_block(&xored, key);
             prev = encrypted.clone();
             buffer_blocks.extend_from_slice(&encrypted);
@@ -1014,11 +916,14 @@ mod tests_crypto_challenge_2 {
         // println!("CBC Encrypted Data: {:?}", buffer_blocks);
     }
 
-
     #[test]
     /// plaintext: `This is a test message for CBC mode`
     fn cbc_decrypt() {
-        let encrypted_data: Vec<u8> = vec![89, 245, 143, 60, 140, 62, 115, 150, 176, 229, 133, 179, 184, 50, 45, 56, 254, 115, 179, 182, 199, 227, 156, 161, 162, 214, 247, 195, 43, 124, 255, 48, 245, 233, 151, 42, 12, 62, 18, 178, 249, 157, 219, 121, 171, 137, 239, 194];
+        let encrypted_data: Vec<u8> = vec![
+            89, 245, 143, 60, 140, 62, 115, 150, 176, 229, 133, 179, 184, 50, 45, 56, 254, 115,
+            179, 182, 199, 227, 156, 161, 162, 214, 247, 195, 43, 124, 255, 48, 245, 233, 151, 42,
+            12, 62, 18, 178, 249, 157, 219, 121, 171, 137, 239, 194,
+        ];
         let key = b"YELLOW SUBMARINE";
         const BLOCK_SIZE: usize = 16;
         let iv = [0u8; BLOCK_SIZE];
@@ -1027,25 +932,35 @@ mod tests_crypto_challenge_2 {
 
         for block in encrypted_data.chunks(BLOCK_SIZE) {
             let decrypted = super::cbc_decrypt_block(block, key);
-            let xored: Vec<u8> = decrypted.iter()
-                                          .zip(&prev)
-                                          .map(|(b, p)| b ^ p)
-                                          .collect();
-            println!("Decrypted Block (as string): {}", String::from_utf8_lossy(&xored));
+            let xored: Vec<u8> = decrypted.iter().zip(&prev).map(|(b, p)| b ^ p).collect();
+            println!(
+                "Decrypted Block (as string): {}",
+                String::from_utf8_lossy(&xored)
+            );
 
             prev = block.to_vec(); // 這裡要設為密文，而不是明文
             plaintext.extend_from_slice(&xored);
         }
         println!("Decrypted Block: {:?}", plaintext);
-        println!("CBC Decrypted Data: {:?}", String::from_utf8_lossy(&pkcs7_unpad(&plaintext)));
+        println!(
+            "CBC Decrypted Data: {:?}",
+            String::from_utf8_lossy(&pkcs7_unpad(&plaintext))
+        );
     }
 
     #[test]
     /// result: `This is a test message for CBC mode`
-    fn test_cbc_decrypt(){
-        let data =  vec![89, 245, 143, 60, 140, 62, 115, 150, 176, 229, 133, 179, 184, 50, 45, 56, 254, 115, 179, 182, 199, 227, 156, 161, 162, 214, 247, 195, 43, 124, 255, 48, 245, 233, 151, 42, 12, 62, 18, 178, 249, 157, 219, 121, 171, 137, 239, 194];
+    fn test_cbc_decrypt() {
+        let data = vec![
+            89, 245, 143, 60, 140, 62, 115, 150, 176, 229, 133, 179, 184, 50, 45, 56, 254, 115,
+            179, 182, 199, 227, 156, 161, 162, 214, 247, 195, 43, 124, 255, 48, 245, 233, 151, 42,
+            12, 62, 18, 178, 249, 157, 219, 121, 171, 137, 239, 194,
+        ];
         let decrypted = super::cbc_decrypt(&data, b"YELLOW SUBMARINE", &[0u8; 16]);
-        println!("Decrypted Data: {:?}", String::from_utf8_lossy(&pkcs7_unpad(&decrypted)));
+        println!(
+            "Decrypted Data: {:?}",
+            String::from_utf8_lossy(&pkcs7_unpad(&decrypted))
+        );
     }
     #[test]
     /// [89, 245, 143, 60, 140, 62, 115, 150, 176, 229, 133, 179,
@@ -1059,10 +974,9 @@ mod tests_crypto_challenge_2 {
         const BLOCK_SIZE: usize = 16; // AES block size
         let iv = [0u8; BLOCK_SIZE]; // 128-bit IV
 
-        let encrypted= super::cbc_encrypt(&padded_data, key, &iv);
-            // println!("CBC Encrypted Data: {:?}", encrypted);
+        let _encrypted = super::cbc_encrypt(&padded_data, key, &iv);
+        // println!("CBC Encrypted Data: {:?}", encrypted);
     }
-
 
     #[test]
     /// [download](https://cryptopals.com/static/challenge-data/10.txt)
@@ -1072,17 +986,19 @@ mod tests_crypto_challenge_2 {
     /// retult:`I'm back and I'm ...`
     fn test_cbc_mode() {
         let data = fs::read_to_string("data/10.txt")
-            .expect("Failed to read file").lines().collect::<String>();
-        let data = base64::decode(
-            data
-        )
-            .expect("Failed to decode base64");
+            .expect("Failed to read file")
+            .lines()
+            .collect::<String>();
+        let data = base64::Engine::decode(&super::engine, data).expect("Failed to decode base64");
         const BLOCK_SIZE: usize = 16; // AES block size
         let iv = [0u8; BLOCK_SIZE]; // 128bit = 16 bytes
         let key = b"YELLOW SUBMARINE";
 
         let decrypted = super::cbc_decrypt(&data, key, &iv);
-        println!("CBC Encrypted Data: {}", String::from_utf8_lossy(&pkcs7_unpad(&decrypted)));
+        println!(
+            "CBC Encrypted Data: {}",
+            String::from_utf8_lossy(&pkcs7_unpad(&decrypted))
+        );
     }
 
     #[test]
@@ -1093,23 +1009,30 @@ mod tests_crypto_challenge_2 {
         let mut encrypted = Vec::new();
         let plaintext_prefix = base64::Engine::decode(&super::engine, "Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkgaGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBqdXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUgYnkK").expect("REASON");
 
-        let plaintext =  [plaintext_prefix.as_slice(),b" this is a test message 112233 aabbcc !@#$%^&*()_+"].concat();
+        let plaintext = [
+            plaintext_prefix.as_slice(),
+            b" this is a test message 112233 aabbcc !@#$%^&*()_+",
+        ]
+        .concat();
         let padded_plaintext = super::pkcs7_pad(&plaintext, 16);
         encrypted.extend(super::ecb_encrypt(&padded_plaintext, key));
         println!("Encrypted: {:?}", encrypted);
 
         let decrypted = super::ecb_decrypt(&encrypted, key);
-        println!("Decrypted: {:?} , {}", decrypted, String::from_utf8(decrypted.clone()).unwrap());
+        println!(
+            "Decrypted: {:?} , {}",
+            decrypted,
+            String::from_utf8(decrypted.clone()).unwrap()
+        );
         assert_eq!(decrypted, padded_plaintext);
 
-
         // 測試逆向
-        let bytes= b"AAAAAAAAAAAAAAA";
-        let mut result = [0u8;16];
+        let bytes = b"AAAAAAAAAAAAAAA";
+        let mut result = [0u8; 16];
         result[..15].copy_from_slice(bytes);
         let compare = super::ecb_encrypt(&result, key);
-        let mut a:Vec<Vec<u8>> = Vec::new();
-        let mut b: Vec<u8>  = Vec::new();
+        let mut a: Vec<Vec<u8>> = Vec::new();
+        let _b: Vec<u8> = Vec::new();
         for i in 0..=255 {
             result[15] = i;
             println!("Testing byte: {:?}", &result);
@@ -1123,16 +1046,117 @@ mod tests_crypto_challenge_2 {
         }
         println!("Encrypted Bytes: {:?}", a);
         println!("Compare: {:?}", compare);
-        for (i,v) in a.iter().enumerate() {
+        for (i, v) in a.iter().enumerate() {
             if v == &compare[..16] {
                 println!(" found byte: {}", i);
                 break;
             }
         }
     }
+
+    fn test_detect_block_size(encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>, key: &[u8]) -> usize {
+        let mut prev_len = encrypt(&[], key).len();
+        for i in 1..=32 {
+            let input = vec![b'A'; i];
+            let curr_len = encrypt(&input, key).len();
+            if curr_len > prev_len {
+                return curr_len - prev_len;
+            }
+            prev_len = curr_len;
+        }
+        panic!("Block size not detected");
+    }
+
+    fn test_is_ecb(
+        encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>,
+        key: &[u8],
+        block_size: usize,
+    ) -> bool {
+        let input = vec![b'A'; block_size * 2];
+        let encrypted = encrypt(&input, key);
+        encrypted[..block_size] == encrypted[block_size..2 * block_size]
+    }
+
+    fn test_crack_unknown_string(
+        encrypt: impl Fn(&[u8], &[u8]) -> Vec<u8>,
+        key: &[u8],
+        block_size: usize,
+    ) -> Vec<u8> {
+        let target = encrypt(&[], key);
+        if target.is_empty() {
+            println!("Error: unknown-string is empty or encrypt function returned no data");
+            return Vec::new();
+        }
+
+        let mut unknown_string = Vec::new();
+        for pos in 0..target.len() {
+            let block_idx = pos / block_size;
+            let input_len = block_size - 1 - (pos % block_size);
+            let input = vec![b'A'; input_len];
+
+            // 構造字典，嘗試所有可能的最後一個字節
+            let mut dict = HashMap::new();
+            for i in 0..=255 {
+                // 構造用於生成字典條目的輸入: padding + 已知字符串 + 測試字節
+                let mut test_input = input.clone();
+                test_input.extend_from_slice(&unknown_string);
+                test_input.push(i);
+                // if test_input.len() != block_size {
+                //     println!("Error: test_input length is {}, expected {}", test_input.len(), block_size);
+                //     continue;
+                // }
+                // 加密並保存結果的前 block_size 字節
+                let encrypted = encrypt(&test_input, key);
+                // println!("Test input: {:?}, Encrypted block: {:?}", test_input, &encrypted[..block_size]);
+                dict.insert(encrypted[..block_size].to_vec(), i);
+            }
+            // println!("Target block: {:?}", target_block);
+            // 構造目標輸入：input
+            let target_input = vec![b'A'; input_len];
+            // 獲取目標密文的對應塊
+            let target_encrypted = encrypt(&target_input, key);
+            let target_block_start = block_idx * block_size;
+            let target_block_end = (block_idx + 1) * block_size;
+            if target_block_end > target_encrypted.len() {
+                break; // 已經解密完所有塊
+            }
+            let target_block = &target_encrypted[target_block_start..target_block_end];
+
+            // let target_block = &target[(pos / block_size) * block_size..(pos / block_size + 1) * block_size];
+            // println!("Position: {}, Input: {:?}", pos, input);
+            if let Some(&byte) = dict.get(target_block) {
+                unknown_string.push(byte);
+                println!("Found byte: {} ('{}')", byte, byte as char);
+            } else {
+                println!("No match found at position {}", pos);
+                break;
+            }
+        }
+
+        unknown_string
+    }
+
+    #[test]
+    fn test_byte_at_a_time_ecb_decryption() {
+        let key = b"YELLOW SUBMARINE";
+        let block_size = test_detect_block_size(ecb_encrypt_unknown_string, key);
+        println!("Detected block size: {}", block_size);
+
+        let is_ecb = test_is_ecb(ecb_encrypt_unknown_string, key, block_size);
+        println!("Is ECB mode: {}", is_ecb);
+
+        if is_ecb {
+            let unknown_string =
+                test_crack_unknown_string(ecb_encrypt_unknown_string, key, block_size);
+            println!(
+                "Cracked string: {:?}",
+                String::from_utf8_lossy(&unknown_string)
+            );
+        }
+    }
 }
 
-
+#[allow(dead_code)]
 /// BLOCK_SIZE=16
 fn ecb_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     assert_eq!(block.len(), 16, "Block must be exactly 16 bytes for AES");
@@ -1150,11 +1174,10 @@ fn ecb_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
 
     block_copy
 }
+#[allow(dead_code)]
 fn ecb_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
-
     let mut encrypted = Vec::new();
-    for block in  data.chunks(16) {
-
+    for block in data.chunks(16) {
         if block.len() == 16 {
             encrypted.extend(ecb_encrypt_block(block, key));
         } else {
@@ -1164,12 +1187,15 @@ fn ecb_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     }
     encrypted
 }
+#[allow(dead_code)]
 fn ecb_encrypt_unknown_string(data: &[u8], key: &[u8]) -> Vec<u8> {
-    let unknown_string = base64::Engine::decode(&engine,"Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkgaGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBqdXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUgYnkK");
-    let data = pkcs7_pad(&[data, unknown_string.unwrap().as_slice()].concat(),16);
+    let unknown_string = base64::Engine::decode(
+        &engine,
+        "Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkgaGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBqdXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUgYnkK",
+    );
+    let data = pkcs7_pad(&[data, unknown_string.unwrap().as_slice()].concat(), 16);
     let mut encrypted = Vec::new();
-    for block in  data.chunks(16) {
-
+    for block in data.chunks(16) {
         if block.len() == 16 {
             encrypted.extend(ecb_encrypt_block(block, key));
         } else {
@@ -1180,9 +1206,9 @@ fn ecb_encrypt_unknown_string(data: &[u8], key: &[u8]) -> Vec<u8> {
     encrypted
 }
 
-
+#[allow(dead_code)]
 /// BLOCK_SIZE=16
-fn ecb_decrypt_block(mut block: &[u8], key: &[u8]) -> Vec<u8> {
+fn ecb_decrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     let cipher = aes::Aes128Dec::new_from_slice(key).expect("Failed to create cipher");
     let mut block_copy = block.to_vec();
     // Decrypt without unpadding first
@@ -1196,31 +1222,30 @@ fn ecb_decrypt_block(mut block: &[u8], key: &[u8]) -> Vec<u8> {
     }
     block_copy
 }
+#[allow(dead_code)]
 fn ecb_decrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     let mut decrypted = Vec::new();
     for block in data.chunks(16) {
-
         let decrypted_block = ecb_decrypt_block(block, key);
         decrypted.extend_from_slice(&decrypted_block);
     }
     decrypted
-
 }
 
-
+#[allow(dead_code)]
 /// 對輸入數據進行 PKCS#7 填充，返回填充後的數據
 fn pkcs7_pad(data: &[u8], block_size: usize) -> Vec<u8> {
     let padding_size = block_size - (data.len() % block_size);
     if padding_size == block_size || padding_size == 0 {
         return data.to_vec(); // No padding needed
     }
-    let mut padded_data = Vec::with_capacity(data.len() );
+    let mut padded_data = Vec::with_capacity(data.len());
     padded_data.extend_from_slice(data);
     padded_data.extend(vec![padding_size as u8; padding_size]);
     padded_data
 }
 
-
+#[allow(dead_code)]
 fn pkcs7_unpad(data: &[u8]) -> Vec<u8> {
     if data.is_empty() {
         return Vec::new();
@@ -1229,13 +1254,16 @@ fn pkcs7_unpad(data: &[u8]) -> Vec<u8> {
     if padding_size == 0 || padding_size > data.len() {
         return Vec::new(); // Invalid padding
     }
-    if data[data.len() - padding_size..].iter().any(|&x| x != padding_size as u8) {
+    if data[data.len() - padding_size..]
+        .iter()
+        .any(|&x| x != padding_size as u8)
+    {
         return Vec::new(); // Invalid padding
     }
     data[..data.len() - padding_size].to_vec()
 }
 
-
+#[allow(dead_code)]
 fn cbc_decrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     use cipher::KeyInit;
     let cipher = aes::Aes128Dec::new(key[..16].try_into().expect("Key must be 16 bytes"));
@@ -1245,8 +1273,7 @@ fn cbc_decrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
 
     buf.to_vec()
 }
-
-
+#[allow(unused)]
 fn cbc_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     use cipher::KeyInit;
     let cipher = aes::Aes128Enc::new(key[..16].try_into().expect("Key must be 16 bytes"));
@@ -1257,7 +1284,7 @@ fn cbc_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     buf.to_vec()
 }
 
-
+#[allow(dead_code)]
 fn cbc_decrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     let mut decrypted = Vec::new();
     let mut prev_block = iv.to_vec();
@@ -1274,15 +1301,13 @@ fn cbc_decrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     }
     decrypted
 }
+#[allow(dead_code)]
 fn cbc_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     let mut prev = iv.to_vec();
     let mut buffer_blocks: Vec<u8> = Vec::with_capacity(data.len());
 
     for block in data.chunks(16) {
-        let xored: Vec<u8> = block.iter()
-                                  .zip(prev.iter())
-                                  .map(|(b, p)| b ^ p)
-                                  .collect();
+        let xored: Vec<u8> = block.iter().zip(prev.iter()).map(|(b, p)| b ^ p).collect();
         let encrypted = cbc_encrypt_block(&xored, key);
         prev = encrypted.clone();
         buffer_blocks.extend_from_slice(&encrypted);
@@ -1290,16 +1315,14 @@ fn cbc_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     }
     // println!("CBC Encrypted Data: {:?}", buffer_blocks);
     buffer_blocks
-
-
 }
-
+#[allow(dead_code)]
 /// 檢測 ECB/CBC 模式
 ///
 /// True: ECB
 /// False: CBC
 fn ecb_cbc_detection(data: &[u8]) -> bool {
-    let mut blocks: Vec<&[u8]> = data.chunks(16).collect();
+    let blocks: Vec<&[u8]> = data.chunks(16).collect();
     let mut unique_blocks: HashSet<&[u8]> = HashSet::new();
     for block in &blocks {
         if !unique_blocks.insert(block) {
@@ -1308,5 +1331,4 @@ fn ecb_cbc_detection(data: &[u8]) -> bool {
         }
     }
     false
-
 }
