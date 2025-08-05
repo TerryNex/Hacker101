@@ -167,6 +167,7 @@ mod tests_crypto_challenge_2 {
             String::from_utf8_lossy(&pkcs7_unpad(&decrypted))
         );
     }
+
     #[test]
     /// [89, 245, 143, 60, 140, 62, 115, 150, 176, 229, 133, 179,
     /// 184, 50, 45, 56, 254, 115, 179, 182, 199, 227, 156, 161,
@@ -359,6 +360,129 @@ mod tests_crypto_challenge_2 {
             );
         }
     }
+
+
+    use serde_json;
+
+
+    #[test]
+    /// 利用 ECB 模式块独立性篡改 role 字段的流程
+    ///
+    /// 核心原理：通过控制明文长度使目标字段（role~user）和替换内容（admin）各自占据独立的加密块，
+    /// 再通过替换对应密文块实现字段篡改（无需知晓密钥）。
+    ///
+    /// 步骤如下：
+    /// 1. 加密原始内容，保存基准密文
+    /// - 原始内容："email~foo@bar.com!id~123!role~user"
+    /// - 操作：直接加密该内容，得到密文 A（作为参考，确认原始加密逻辑）。
+    /// - 目的：记录原始内容的加密结果，用于后续对比。
+    /// 2. 填充原始内容，使 role~user 单独占据一个块
+    /// - 构造填充后的内容："email~foo@bar.com77!id~123!role~user"
+    /// - 操作：通过添加填充字符（如 77）调整总长度，使 role~user 及其填充刚好占满一个 16 字节块（假设为第 3 块）。
+    /// - 结果：加密后得到 48 字节密文（3 个块，16×3=48），确认 role~user 位于第 3 块。
+    /// - 目的：确保目标字段 role~user 所在的密文块可被单独替换。
+    /// 3. 构造含 admin 的内容，使其占据与 role~user 相同的块
+    /// - 构造内容："email~foo@bar.com7777777\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0badmin\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b!id~123!role~user"
+    /// - 操作：
+    /// - 前半部分通过填充字符（7777777）和控制字符（\x0b）调整长度，确保前 2 块被填满；
+    /// - 使 admin 与填充（\x0b）组成 16 字节独立块（刚好占据第 3 块）。
+    /// - 结果：加密后得到 5 个块（80 字节），确认 admin 对应的密文位于第 3 块。
+    /// - 目的：生成与 role~user 同块序号的 admin 密文块。
+    /// 4. 替换密文块，完成篡改
+    /// - 操作：提取步骤 3 中第 3 块密文（admin 对应的密文），替换步骤 2 中得到的 48 字节密文的第 3 块。
+    /// - 结果：解密替换后的密文，得到 "email~foo@bar.com77!id~123!role~admin"。
+    /// - 原理：ECB 模式中密文块与明文块一一对应，替换第 3 块密文即替换对应明文块内容。
+    fn test_encode_input() {
+        let input = "foo@bar.com";
+
+        fn encode_input(input: &str) -> String {
+            format!(r#"{{"email":"{input}","id":123,"role":"user"}}"#,)
+        }
+        let encoded_string = encode_input(input);
+        // println!("Encoded JSON: {}", encoded_string); // Encoded JSON: {"email":"foo@bar.com","id":123,"role":"user"}
+        // encode a string to "key=value&key2=value2" format
+        // replace `&` with `!` and `=` with `~`
+        fn replace_metacharacters(s: &str) -> String {
+            s.replace("{", "")
+                .replace("}", "")
+                .replace('"', "")
+                .replace(':', "~")
+                .replace(',', "!")
+        }
+        let encoded_plaintext = replace_metacharacters(&*encoded_string);
+        // println!("Encoded JSON: {}", encoded_plaintext); // email=foo@bar.com!id=123!role=user
+
+        let key = b"ABCDEFGHIJKLMNOP";
+        let padded_plaintext = super::pkcs7_pad(encoded_plaintext.as_bytes(), 16);
+        let encrypted_data = super::ecb_encrypt(&padded_plaintext, key);
+        // println!("Encrypted Data: {encrypted_data:?}"); // Encrypted Data: [88, 145, 190, 80, 85, 246, 130, 100, 86, 90, 152, 114, 134, 252, 12, 181, 89, 228, 202, 247, 107, 196, 151, 193, 116, 94, 25, 239, 86, 216, 207, 169, 168, 55, 204, 208, 1, 194, 237, 170, 31, 149, 230, 16, 115, 202, 163, 213]
+
+        fn encrypt(email: &str, key: &[u8]) -> Vec<u8> {
+            let data = encode_input(email.as_ref());
+            let data = replace_metacharacters(&data);
+            // println!("Encoded Plaintext: {encoded_plaintext:?}");
+            let padded_plaintext = super::pkcs7_pad((&data).as_ref(), 16);
+            // println!("Padded Plaintext: {padded_plaintext:?}");
+            let encrypted = super::ecb_encrypt(padded_plaintext.as_ref(), key);
+            // println!("Encrypted: {encrypted:?}" );
+            encrypted
+        }
+        fn decrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
+            let decrypted = super::ecb_decrypt(data, key);
+            let unpadded = super::pkcs7_unpad(&decrypted);
+            unpadded
+        }
+        // println!("Encrypted Data: {:?}", encrypt("foo@bar.com", key));// Decrypted Data: "email~foo@bar.com!id~123!role~user"
+        // println!("Decrypted Data: {:?}", String::from_utf8_lossy(&decrypt(&encrypted_data, key)));
+
+        // let the role=user on the new block
+        // [25] email~foo@bar.com!id~123!
+        // email~foo@bar.com7777777!id~123!
+        println!("Encrypted Data: {:?}", encrypt("foo@bar.com77", key)); // Decrypted Data: "email~foo@bar.com!id~123!role~user"
+        println!(
+            "Decrypted Data: {:?}",
+            String::from_utf8_lossy(&decrypt(&*encrypt("foo@bar.com77", key), key))
+        );
+        /*  [30, 81, 137, 84, 45, 18, 21, 85, 79, 44, 226, 103, 47, 41, 85, 138,
+           28, 112, 221, 53, 138, 223, 78, 104, 112, 140, 249, 3, 164, 149, 59, 226,
+           98, 89, 25, 112, 218, 147, 15, 140, 129, 205, 189, 30, 97, 38, 122, 22]
+        */
+
+        /* //let admin place at the Independent block
+
+        let encode_block4= encode_input(block4);
+        for i in encode_block4.as_bytes().chunks(16) {
+            println!("Block4: {:?}  str{}", i,String::from_utf8_lossy(i) );
+        };
+
+        */
+        let block4 = "foo@bar.com7777777\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0badmin\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b";
+        println!("Encrypted Data: {:?}", encrypt(block4, key));
+
+        /*
+        // get the admin ciphertext to replace the raw ciphertext at the same block (3)
+        [30, 81, 137, 84, 45, 18, 21, 85, 79, 44, 226, 103, 47, 41, 85, 138,
+        221, 178, 60, 178, 78, 96, 137, 235, 167, 9, 82, 32, 118, 239, 138, 2,
+        224, 135, 67, 63, 117, 221, 17, 167, 254, 37, 167, 28, 98, 83, 209, 61,   // admin
+        107, 198, 61, 229, 165, 66, 102, 111, 149, 167, 114, 194, 134, 48, 3, 106, 70, 11, 52, 53, 26, 235, 200, 166, 153, 107, 33, 210, 189, 123, 251, 78]
+        */
+
+        println!(
+            "Decrypted Data: {:?}",
+            String::from_utf8_lossy(&decrypt(
+                &[
+                    30, 81, 137, 84, 45, 18, 21, 85, 79, 44, 226, 103, 47, 41, 85, 138, 28, 112,
+                    221, 53, 138, 223, 78, 104, 112, 140, 249, 3, 164, 149, 59, 226, 224, 135, 67,
+                    63, 117, 221, 17, 167, 254, 37, 167, 28, 98, 83, 209, 61,
+                ],
+                key
+            ))
+        );
+        /*
+        Encrypted Data: [30, 81, 137, 84, 45, 18, 21, 85, 79, 44, 226, 103, 47, 41, 85, 138, 221, 178, 60, 178, 78, 96, 137, 235, 167, 9, 82, 32, 118, 239, 138, 2, 224, 135, 67, 63, 117, 221, 17, 167, 254, 37, 167, 28, 98, 83, 209, 61, 107, 198, 61, 229, 165, 66, 102, 111, 149, 167, 114, 194, 134, 48, 3, 106, 70, 11, 52, 53, 26, 235, 200, 166, 153, 107, 33, 210, 189, 123, 251, 78]
+           Decrypted Data: "email~foo@bar.com77!id~123!role~admin"
+        */
+    }
 }
 
 #[allow(unused)]
@@ -379,6 +503,7 @@ fn ecb_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
 
     block_copy
 }
+
 #[allow(unused)]
 pub fn ecb_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     let mut encrypted = Vec::new();
@@ -392,6 +517,7 @@ pub fn ecb_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     }
     encrypted
 }
+
 #[allow(unused)]
 pub fn ecb_encrypt_unknown_string(data: &[u8], key: &[u8]) -> Vec<u8> {
     let unknown_string = base64::Engine::decode(
@@ -427,6 +553,7 @@ pub fn ecb_decrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     }
     block_copy
 }
+
 #[allow(unused)]
 pub fn ecb_decrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     let mut decrypted = Vec::new();
@@ -478,6 +605,7 @@ pub fn cbc_decrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
 
     buf.to_vec()
 }
+
 #[allow(unused)]
 pub fn cbc_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     use cipher::KeyInit;
@@ -506,6 +634,7 @@ pub fn cbc_decrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     }
     decrypted
 }
+
 #[allow(unused)]
 pub fn cbc_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     let mut prev = iv.to_vec();
@@ -521,6 +650,7 @@ pub fn cbc_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     // println!("CBC Encrypted Data: {:?}", buffer_blocks);
     buffer_blocks
 }
+
 #[allow(unused)]
 /// 檢測 ECB/CBC 模式
 ///
