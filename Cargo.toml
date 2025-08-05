@@ -1,5 +1,5 @@
 [package]
-name = "Hacker101_Encrypted_Pastebin"
+name = "hacker101_encrypted_pastebin"
 version = "0.1.0"
 edition = "2024"
 

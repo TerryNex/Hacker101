@@ -1,0 +1,813 @@
+use std::error::Error;
+use std::ops::Range;
+
+
+#[cfg(test)]
+/// ### Reference: [Crypto Challenge Set 1](https://cryptopals.com/sets/1)
+///
+/// * 這些測試用於驗證加密和解密功能，並確保它們能夠正確處理 Base64 編碼、十六進位字串轉換、XOR 操作等。
+/// * 也可以用於學習基礎的加密技術和解密方法。
+/// * 按照順序執行這些測試，並確保它們都能通過。
+
+mod tests_crypto_challenge_set_1 {
+    use crate::challenge_2::ecb_cbc_detection;
+    use aes::cipher::BlockCipherDecrypt;
+    use aes::cipher::KeyInit;
+    use base64::engine::general_purpose::STANDARD as engine;
+    use cipher::block_padding::Pkcs7;
+    use cipher::BlockCipherEncrypt;
+    use rand::Rng;
+    use std::fs;
+
+
+    #[test]
+    /// 將十六進位字串轉換為 Base64 編碼
+    ///
+    /// 每兩個十六進位字符代表一個字節，將其轉換為字節後，再使用 Base64 編碼。
+    ///
+    /// result:
+    /// `Hex Decoded: I'm killing your brain like a poisonous mushroom`
+    /// `Base64 Encoded: SSdtIGtpbGxpbmcgeW91ciBicmFpbiBsaWtlIGEgcG9pc29ub3VzIG11c2hyb29t`
+    ///
+    fn hex_to_base64() {
+        let hex_string = "49276d206b696c6c696e6720796f757220627261696e206c696b65206120706f69736f6e6f7573206d757368726f6f6d";
+        let mut hex_decoded = Vec::new();
+        for i in (0..hex_string.len()).step_by(2) {
+            let byte = u8::from_str_radix(&hex_string[i..i + 2], 16).unwrap();
+            // print!("{:?} ", byte.as_ascii());
+            hex_decoded.push(byte);
+        }
+        println!(
+            "Hex Decoded: {}",
+            String::from_utf8(hex_decoded.clone()).unwrap()
+        );
+        // I'm killing your brain like a poisonous mushroom
+        let base64_encoded = base64::Engine::encode(&engine, &hex_decoded);
+        println!("Base64 Encoded: {}", base64_encoded);
+        // SSdtIGtpbGxpbmcgeW91ciBicmFpbiBsaWtlIGEgcG9pc29ub3VzIG11c2hyb29t
+
+        // let bytes = hex_string.as_bytes();
+        // let base64_encoded = base64::decode("SSdtIGtpbGxpbmcgeW91ciBicmFpbiBsaWtlIGEgcG9pc29ub3VzIG11c2hyb29t");
+        // println!("{:?}\n{:?}", &base64_encoded.clone(),String::from_utf8(base64_encoded.unwrap()).unwrap());
+        /*
+        SSdtIGtpbGxpbmcgeW91ciBicmFpbiBsaWtlIGEgcG9pc29ub3VzIG11c2hyb29t
+
+        Ok([73, 39, 109, 32, 107, 105, 108, 108, 105, 110, 103, 32, 121, 111, 117, 114, 32, 98, 114, 97, 105, 110, 32, 108, 105, 107, 101, 32, 97, 32, 112, 111, 105, 115, 111, 110, 111, 117, 115, 32, 109, 117, 115, 104, 114, 111, 111, 109])
+
+        "I'm killing your brain like a poisonous mushroom"
+        */
+    }
+
+    #[test]
+    /// XOR combination
+    ///
+    /// 將兩個十六進位字串轉換為字節，然後進行 XOR 操作，最後將結果轉換回十六進位字串。
+    ///
+    /// result:
+    /// ```
+    /// Input1: [28, 1, 17, 0, 31, 1, 1, 0, 6, 26, 2, 75, 83, 83, 80, 9, 24, 28]
+    /// Input2: [104, 105, 116, 32, 116, 104, 101, 32, 98, 117, 108, 108, 39, 115, 32, 101, 121, 101]
+    /// XOR Result: [116, 104, 101, 32, 107, 105, 100, 32, 100, 111, 110, 39, 116, 32, 112, 108, 97, 121]
+    /// XOR Hex: 746865206b696420646f6e277420706c6179
+    /// ```
+    fn xor_combination() {
+        let input1 = "1c0111001f010100061a024b53535009181c";
+        let input2 = "686974207468652062756c6c277320657965";
+
+        let input1_bytes: Vec<u8> = input1
+            .as_bytes()
+            .chunks(2)
+            .map(|hex_pair| u8::from_str_radix(std::str::from_utf8(hex_pair).unwrap(), 16).unwrap())
+            .collect::<Vec<u8>>();
+        println!("Input1: {:?}", input1_bytes);
+
+        let input2_bytes: Vec<u8> = input2
+            .as_bytes()
+            .chunks(2)
+            .map(|hex_pair| u8::from_str_radix(std::str::from_utf8(hex_pair).unwrap(), 16).unwrap())
+            .collect::<Vec<u8>>();
+        println!("Input2: {:?}", input2_bytes);
+
+        let xor_result: Vec<u8> = input1_bytes
+            .iter()
+            .zip(input2_bytes.iter())
+            .map(|(a, b)| a ^ b)
+            .collect();
+        println!("XOR Result: {:?}", xor_result);
+        let xor_hex: String = xor_result
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect();
+        println!("XOR Hex: {}", xor_hex);
+    }
+
+    #[test]
+    /// 從 hex 字符串中找出單一 byte 0x00~0xFF 當做 key, 被用來加密整段信息
+    ///
+    /// hex -> bytes
+    ///
+    /// Try XORing each byte with every key from 0 to 255.
+    /// find the key that produces the most common English words
+    ///
+    /// result:
+    /// ```
+    /// Hex Bytes: [27, 55, 55, 51, 49, 54, 63, 120, 21, 27, 127, 43, 120, 52, 49, 51, 61, 120, 57, 120, 40, 55, 45, 54, 60, 120, 55, 62, 120, 58, 57, 59, 55, 54]
+    /// Best Key: 58
+    /// Best Decrypted(length:34): [67, 111, 111, 107, 105, 110, 103, 32, 77, 67, 39, 115, 32, 108, 105, 107, 101, 32, 97, 32, 112, 111, 117, 110, 100, 32, 111, 102, 32, 98, 97, 99, 111, 110]
+    /// Best Decrypted String: Cooking MC's like a pound of bacon
+    /// ```
+    fn single_byte_xor() {
+        let hex_string = "1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736";
+        let hex_bytes: Vec<u8> = hex_string
+            .as_bytes()
+            .chunks(2)
+            .map(|hex_pair| u8::from_str_radix(std::str::from_utf8(hex_pair).unwrap(), 16).unwrap())
+            .collect();
+        println!("Hex Bytes: {:?}", hex_bytes);
+        let mut best_score = 0;
+        let mut best_key = 0;
+        let mut best_decrypted = Vec::new();
+        for key in 0..=255 {
+            let decrypted: Vec<u8> = hex_bytes.iter().map(|&byte| byte ^ key).collect();
+            let score = decrypted
+                .iter()
+                .filter(|&&c| c.is_ascii_alphabetic() || c.is_ascii_whitespace())
+                .count();
+            if score > best_score {
+                best_score = score;
+                best_key = key;
+                best_decrypted = decrypted;
+            }
+        }
+
+        println!("Best Key: {:02x}", best_key);
+        println!(
+            "Best Decrypted(length:{}): {:?}",
+            best_decrypted.len(),
+            best_decrypted
+        );
+        println!(
+            "Best Decrypted String: {}",
+            String::from_utf8(best_decrypted).unwrap()
+        );
+        /*
+        Best Key: 58
+        Best Decrypted(length:34): [67, 111, 111, 107, 105, 110, 103, 32, 77, 67, 39, 115, 32, 108, 105, 107, 101, 32, 97, 32, 112, 111, 117, 110, 100, 32, 111, 102, 32, 98, 97, 99, 111, 110]
+        Best Decrypted String: Cooking MC's like a pound of bacon
+        */
+    }
+
+    #[tokio::test]
+    /// [test strings](https://cryptopals.com/static/challenge-data/4.txt)
+    ///
+    /// use [single_byte_xor](single_byte_xor) to find the best key
+    ///
+    /// result:
+    /// ```
+    /// Character length: 19944
+    /// Lines: 327
+    /// Best Key: 35
+    /// Best Decrypted(length:30): [78, 111, 119, 32, 116, 104, 97, 116, 32, 116, 104, 101, 32, 112, 97, 114, 116, 121, 32, 105, 115, 32, 106, 117, 109, 112, 105, 110, 103, 10]
+    /// Best Decrypted String: Now that the party is jumping
+    /// ```
+    async fn single_byte_xor_test() {
+        // http req. from https://cryptopals.com/static/challenge-data/4.txt
+        // let hex_string = reqwest::get("https://cryptopals.com/static/challenge-data/4.txt")
+        //     .await
+        //     .expect("Failed to fetch data")
+        //     .text()
+        //     .await
+        //     .expect("Failed to read response text");
+        let hex_string: String = fs::read_to_string("data/4.txt").expect("Failed to read file");
+        println!("Character length: {}", hex_string.len());
+        println!("Lines: {}", hex_string.lines().count());
+        // Character length: 19944
+        // Lines: 327
+
+        let mut best_score = 0;
+        let mut best_key = 0;
+        let mut best_decrypted = Vec::new();
+        for line in hex_string.lines() {
+            let hex_bytes: Vec<u8> = line
+                .as_bytes()
+                .chunks(2)
+                .map(|hex_pair| {
+                    u8::from_str_radix(std::str::from_utf8(hex_pair).unwrap(), 16).unwrap()
+                })
+                .collect();
+            for key in 0..=255 {
+                let decrypted: Vec<u8> = hex_bytes.iter().map(|&byte| byte ^ key).collect();
+                let score = decrypted
+                    .iter()
+                    .filter(|&&c| c.is_ascii_alphabetic() || c.is_ascii_whitespace())
+                    .count();
+                if score > best_score {
+                    best_score = score;
+                    best_key = key;
+                    best_decrypted = decrypted;
+                }
+            }
+        }
+        println!("Best Key: {:02x}", best_key);
+        println!("Best Decrypted(length:{})", best_decrypted.len());
+        println!(
+            "Best Decrypted String: {}",
+            String::from_utf8(best_decrypted).unwrap()
+        );
+    }
+
+    #[test]
+    /// 使用 key "ICE" 重複 XOR 加密
+    ///
+    /// 重複 XOR 加密的方式是將 key 重複使用，直到與明文長度相同。
+    ///
+    /// 第一個字節與 I XOR, 第二個字節與 C XOR, 第三個字節與 E XOR, 然後重複。
+    ///
+    /// 第四個字節與 I XOR, 以此類推。
+    ///
+    /// result:
+    /// `Hex String: 0b3637272a2b2e63622c2e69692a23693a2a3c6324202d623d63343c2a26226324272765272a282b2f20430a652e2c652a3124333a653e2b2027630c692b20283165286326302e27282f`
+    fn repeat_key_xor_ice() {
+        let key = "ICE";
+        let plaintext =
+            "Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal";
+        let key_bytes: Vec<u8> = key.as_bytes().to_vec();
+        let plaintext_bytes: Vec<u8> = plaintext.as_bytes().to_vec();
+        let bytes = plaintext_bytes
+            .into_iter()
+            .zip(key_bytes.iter().cycle())
+            .map(|(p, k)| p ^ k)
+            .collect::<Vec<u8>>();
+        let hex_string: String = bytes.iter().map(|byte| format!("{:02x}", byte)).collect();
+        println!("Hex String: {}", hex_string);
+        // Hex String: 0b363b3f1c373
+    }
+
+    #[tokio::test]
+    /// [test strings](https://cryptopals.com/static/challenge-data/6.txt)
+    /// It's been base64'd after being encrypted with repeating-key XOR.
+    ///
+    /// The goal is to decrypt the message and find the key.
+    ///
+    /// 1. 實現 hamming_distance 函數[已驗證](handling_distance)
+    ///
+    /// 2. 將 base64 字符串解碼為字節數組
+    ///
+    /// 3. 嘗試 KEYSIZE = 2..=40, 找到最小的 normalize hamming_distance (Hamming distance/KEYSIZE)
+    /// `KEYSIZE 越大, hamming_distance 越大, 實際上除以 KEYSIZE 才能明確相識度程度`
+    ///
+    /// 4. 用 KEYSIZE 轉置 blocks `(每 KEYSIZE 個字節為一個 block)`
+    /// `轉置 (每個 block 的 index 取出來組成新的 blocks [block1[0], block2[0] ...])`
+    ///
+    /// 5. 對每個轉置的 block 使用 [single_byte_xor](single_byte_xor) 找出最佳 key
+    ///
+    /// 6. 將所有 key 組合起來，解密原始數據, 使用 [repeat_key_XOR](repeat_key_XOR) 方法
+    ///
+    /// result:
+    /// ```
+    /// Best Keysize: 1d
+    /// Best Normalized Hamming Distance: 1.09
+    /// Keys: [84, 101, 114, 109, 105, 110, 97, 116, 111, 114, 32, 88, 58, 32, 66, 114, 105, 110, 103, 32, 116, 104, 101, 32, 110, 111, 105, 115, 101]
+    /// Recovered Key: "Terminator X: Bring the noise"
+    /// Decoded (as string):
+    /// "I'm back and I'm ringin' the bell..."
+    /// ```
+    async fn break_repeating_key_xor() {
+        // 解碼 base64 字符串
+        // let base64_string: String =
+        //     reqwest::get("https://cryptopals.com/static/challenge-data/6.txt")
+        //         .await
+        //         .expect("Failed to fetch data")
+        //         .text()
+        //         .await
+        //         .expect("Failed to read response text")
+        //         .lines()
+        //         .collect();
+        let base64_string: String = fs::read_to_string("data/6.txt")
+            .expect("Failed to read file")
+            .lines()
+            .collect();
+        let bytes =
+            base64::Engine::decode(&engine, base64_string).expect("Failed to decode base64");
+
+        // 嘗試 KEYSIZE
+        let keysize_range = 2..=40;
+        let mut best_normaolized_distance = 0.0;
+        let mut best_keysize = 0;
+        let mut best_transposed_blocks: Vec<Vec<u8>> = Vec::new();
+        for keysize in keysize_range {
+            let mut avg_hamming_distance = 0.0;
+            let bytes_blocks = bytes.chunks(keysize).collect::<Vec<&[u8]>>();
+
+            for i in 0..bytes_blocks.len() {
+                for j in i + 1..bytes_blocks.len() {
+                    let a = &bytes_blocks[i];
+                    let b = &bytes_blocks[j];
+                    if a.len() == b.len() {
+                        avg_hamming_distance += (super::hamming_distance(a, b)
+                            .expect("Failed to calculate hamming distance")
+                            / keysize as usize)
+                            as f64;
+                    }
+                }
+            }
+            avg_hamming_distance /= (bytes_blocks.len() * (bytes_blocks.len() - 1)) as f64;
+            if avg_hamming_distance < best_normaolized_distance || best_normaolized_distance == 0.0
+            {
+                best_normaolized_distance = avg_hamming_distance;
+                best_keysize = keysize;
+
+                best_transposed_blocks = super::transpose_blocks(&bytes, keysize);
+            }
+        }
+        println!("Best Keysize: {:02x}", best_keysize);
+        println!(
+            "Best Normalized Hamming Distance: {:.2}",
+            best_normaolized_distance
+        );
+        // println!("Transposed Blocks: {:?}", best_transposed_blocks);
+        let mut keys: Vec<u8> = Vec::new();
+        for block in best_transposed_blocks {
+            let key = super::single_byte_xor(block)
+                .await
+                .expect("Failed to decrypt block");
+            keys.push(key);
+        }
+        println!("Keys: {:?}", keys);
+        println!("Recovered Key: {:?}", String::from_utf8_lossy(&keys));
+
+        let decoded = super::repeat_key_xor(&bytes, &keys);
+
+        println!(
+            "Decoded (as string):\n{}",
+            String::from_utf8_lossy(&decoded)
+        );
+    }
+
+    #[test]
+    /// this is a pre-test for test [break_repeating_key_xor()](break_repeating_key_xor)
+    ///
+    /// result: `37`
+    fn hamming_distance() {
+        let str1 = b"this is a test";
+        let str2 = b"wokka wokka!!!";
+        let distance = str1
+            .iter()
+            .zip(str2.iter())
+            .map(|(a, b)| a ^ b)
+            .map(|byte| byte.count_ones() as usize)
+            .sum::<usize>();
+        println!("Hamming Distance: {}", distance);
+    }
+
+    #[test]
+    /// test transpose blocks
+    /// ```
+    /// Original Bytes: [116, 104, 105, 115, 32, 105, 115, 32, 97, 32, 116, 101, 115, 116]
+    /// Transposed Blocks: [[116, 32, 97, 115], [104, 105, 32, 116], [105, 115, 116], [115, 32, 101]]
+    /// ```
+    fn transpose_blocks() {
+        let bytes = b"this is a test";
+        let keysize = 4;
+        let bytes_blocks = bytes.chunks(keysize).collect::<Vec<&[u8]>>();
+        let bytes_blocks_transposed: Vec<Vec<u8>> = (0..keysize)
+            .map(|i| {
+                bytes_blocks
+                    .iter()
+                    .filter_map(|block| block.get(i))
+                    .cloned()
+                    .collect()
+            })
+            .collect();
+        println!("Original Bytes: {:?}", bytes);
+        println!("Transposed Blocks: {:?}", bytes_blocks_transposed);
+    }
+
+    #[tokio::test]
+    /// this is for varifying the correctness of `break_repeating_key_xor()`
+    async fn test_break_repeating_key_xor() {
+        let bytes = base64::Engine::decode(
+            &engine,
+            "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"
+                .lines()
+                .collect::<String>(),
+        )
+        .expect("Failed to decode base64");
+        let keysize_range = 2..40;
+        let result = super::break_repeating_key_xor(&bytes, keysize_range);
+        if let Ok(decoded) = result.await {
+            println!("Decoded: {}", String::from_utf8_lossy(&decoded));
+        } else {
+            println!("Failed to break repeating key XOR");
+        }
+    }
+
+    #[test]
+    /// ### [resources](https://cryptopals.com/static/challenge-data/7.txt)
+    /// AES in ECB mode description
+    ///
+    fn aes_ecb() {
+        let result: String = fs::read_to_string("data/7.txt")
+            .expect("Failed to read file")
+            .lines()
+            .collect();
+        let key = b"YELLOW SUBMARINE";
+        let mut base64_string =
+            base64::Engine::decode(&engine, result).expect("Failed to decode base64");
+        // println!("Base64 Decoded: {:?}", base64_string);
+        let cipher = aes::Aes128Dec::new_from_slice(key).expect("Failed to decode base64");
+
+        let _decrypted = cipher
+            .decrypt_padded::<Pkcs7>(&mut base64_string)
+            .expect("Failed to decrypt");
+        // println!("Decrypted: {}", String::from_utf8_lossy(&decrypted));
+    }
+
+    #[test]
+    /// AES ECB 解密
+    /// plaintext: `I'm back and I'm ringin' the bellaabbccddeeff`
+    fn aes_ecb_decrypt() {
+        let key = b"YELLOW SUBMARINE";
+        let ciphertext = [
+            9, 18, 48, 170, 222, 62, 179, 48, 219, 170, 67, 88, 248, 141, 42, 108, 55, 183, 45, 12,
+            244, 194, 44, 52, 74, 236, 65, 66, 208, 12, 229, 48, 252, 32, 60, 43, 28, 19, 32, 87,
+            185, 126, 229, 216, 10, 213, 112, 187,
+        ]
+        .to_vec();
+        println!("Decrypted Bytes: {:?}", ciphertext);
+        let cipher = aes::Aes128Dec::new_from_slice(key).expect("Failed to create cipher");
+
+        let mut buffer = vec![0u8; ciphertext.len() + 16 - (ciphertext.len() % 16)];
+        let decrypted = cipher
+            .decrypt_padded_b2b::<Pkcs7>(&ciphertext, &mut buffer)
+            .unwrap();
+        println!("Decrypted: {}", String::from_utf8_lossy(&decrypted));
+    }
+
+    #[test]
+    /// aec_ecb encryption
+    ///
+    /// result:`091230aade3eb330dbaa4358f88d2a6c37b72d0cf4c22c344aec4142d00ce530fc203c2b1c132057b97ee5d80ad570bb`
+    /// `[9, 18, 48, 170, 222, 62, 179, 48, 219, 170, 67, 88, 248, 141, 42, 108, 55, 183, 45, 12, 244, 194, 44, 52, 74, 236, 65, 66, 208, 12, 229, 48, 252, 32, 60, 43, 28, 19, 32, 87, 185, 126, 229, 216, 10, 213, 112, 187]`
+    fn aes_ecb_encrypt() {
+        let key = b"YELLOW SUBMARINE";
+        let plaintext = b"I'm back and I'm ringin' the bellaabbccddeeff".to_vec();
+        let cipher = aes::Aes128Enc::new_from_slice(key).expect("Failed to create cipher");
+        let mut buffer = vec![0u8; plaintext.len() + 16 - (plaintext.len() % 16)];
+
+        let encrypted = cipher
+            .encrypt_padded_b2b::<Pkcs7>(&plaintext, &mut buffer)
+            .unwrap();
+        println!("Encrypted: {:?}", encrypted);
+        let hex_string: String = encrypted
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect();
+        println!("Ciphertext Hex: {}", hex_string);
+    }
+
+    #[test]
+    /// the problem with ECB is that it is stateless and deterministic; the same 16 byte plaintext block will always produce the same 16 byte ciphertext.
+    fn test_aes_ecb_mode() {
+        let hex_string = fs::read_to_string("data/8.txt").expect("Failed to read file");
+        if ecb_cbc_detection(&hex_string.as_bytes()) {
+            println!("ECB mode detected in the given hex string.");
+        } else {
+            println!("No ECB mode detected in the given hex string.");
+        };
+        // let blocks: Vec<&[u8]> = hex_string.as_bytes().chunks(16).collect();
+        // let mut unique_blocks: HashSet<&[u8]> = HashSet::new();
+        // for block in &blocks {
+        //     if !unique_blocks.insert(block) {
+        //         println!("Repeated block found: {:?}", block);
+        //     }
+        // }
+        // if unique_blocks.len() < blocks.len() {
+        //     println!("Likely ECB mode: detected repeated ciphertext blocks");
+        // }
+    }
+    #[test]
+    /// this test might fail because the strings are not long enough to detect ECB mode
+    fn test_ecb_cbc_detection() {
+        fn generate_random_key() -> [u8; 16] {
+            let mut rng = rand::rng();
+            let mut key = [0u8; 16];
+            rng.fill(&mut key);
+            key
+        }
+        fn generate_random_string() -> String {
+            let mut rng = rand::rng();
+            let length = rng.random_range(5..10);
+            let chars: Vec<char> = (0..length).map(|_| rng.random_range('a'..='z')).collect();
+            chars.into_iter().collect()
+        }
+        let repeat_times = 100;
+        let mut result = 0;
+        let mut rng = rand::rng();
+
+        for _ in 0..repeat_times {
+            let key = generate_random_key();
+            let appended_prefix = generate_random_string();
+            let appended_suffix = generate_random_string();
+
+            let mut plainttext = Vec::new();
+            let input = vec![b'A'; 48]; // need to be long enough to detect ECB mode
+            plainttext.extend_from_slice(appended_prefix.as_bytes());
+            plainttext.extend_from_slice(&input);
+            plainttext.extend_from_slice(appended_suffix.as_bytes());
+            let padded = crate::challenge_2::pkcs7_pad(&plainttext, 16);
+            #[allow(unused_assignments)]
+            let mut encrypted = Vec::new();
+            let mode_choice: bool = rng.random_bool(0.5);
+            if mode_choice {
+                // ECB mode
+                encrypted = crate::challenge_2::ecb_encrypt(&padded, &key);
+            } else {
+                // CBC mode
+                let iv = generate_random_key();
+                encrypted = crate::challenge_2::cbc_encrypt(&padded, &key, &iv);
+            }
+
+            // true if ECB mode is detected
+
+            if mode_choice && crate::challenge_2::ecb_cbc_detection(&encrypted)
+                || !mode_choice && !crate::challenge_2::ecb_cbc_detection(&encrypted)
+            {
+                result += 1;
+            }
+        }
+
+        // percentage of ECB mode detection
+        let percentage = (result as f64 / repeat_times as f64) * 100.0;
+        println!("ECB mode detected in {}% of the cases", percentage);
+        assert!(percentage > 80.0, "ECB mode detection failed");
+    }
+}
+
+#[allow(dead_code)]
+/// 計算兩個字節切片之間的 Hamming 距離, 越小越好.
+/// 對比兩個字節切片，計算它們之間不同位元的數量。`(101^110).count_ones() = 2`
+/// Hamming 距離是指兩個字節切片之間不同位元的數量。
+/// # Arguments
+/// * `str1` - 第一個字節切片
+/// * `str2` - 第二個字節切片
+/// # Returns
+/// * `Result<usize, &'static str>` - 返回 Hamming 距離，如果輸入切片為空或長度不一致則返回錯誤
+fn hamming_distance(str1: &[u8], str2: &[u8]) -> Result<usize, &'static str> {
+    if str1.is_empty() || str2.is_empty() {
+        return Err("Input slices cannot be empty");
+    }
+    if str1.len() != str2.len() {
+        return Err("Input slices must have the same length");
+    }
+    Ok(str1
+        .iter()
+        .zip(str2.iter())
+        .map(|(a, b)| a ^ b)
+        .map(|byte| byte.count_ones() as usize)
+        .sum())
+}
+
+#[allow(dead_code)]
+async fn single_byte_xor_string(str: String) -> Result<u8, Box<dyn Error>> {
+    if str.is_empty() || str.len() < 2 {
+        return Err("Input string must be at least 2 characters long".into());
+    }
+    let mut best_score = 0;
+    let mut best_key = 0;
+    let mut best_decrypted: Vec<u8> = Vec::new();
+    for key in 0..=255 {
+        let decrypted: Vec<u8> = str.as_bytes().iter().map(|&byte| byte ^ key).collect();
+        let score = decrypted
+            .iter()
+            .filter(|&&c| c.is_ascii_alphabetic() || c.is_ascii_whitespace())
+            .count();
+        if score > best_score {
+            best_score = score;
+            best_key = key;
+            best_decrypted = decrypted;
+        }
+    }
+    println!("Best Key: {best_key:02x}\nBest Decrypted: {best_decrypted:?}");
+
+    Ok(best_key) // Placeholder for the actual implementation
+}
+
+#[allow(dead_code)]
+async fn single_byte_xor_u8(str: Vec<u8>) -> Result<u8, Box<dyn Error>> {
+    if str.is_empty() || str.len() < 2 {
+        return Err("Input string must be at least 2 characters long".into());
+    }
+    let mut best_score = 0;
+    let mut best_key = 0;
+    let mut best_decrypted: Vec<u8> = Vec::new();
+    for key in 0..=255 {
+        let decrypted: Vec<u8> = str.iter().map(|&byte| byte ^ key).collect();
+        let score = decrypted
+            .iter()
+            .filter(|&&c| c.is_ascii_alphabetic() || c.is_ascii_whitespace())
+            .count();
+        if score > best_score {
+            best_score = score;
+            best_key = key;
+            best_decrypted = decrypted;
+        }
+    }
+
+    println!("Best Key: {best_key:02x}\nBest Decrypted: {best_decrypted:?}");
+    Ok(best_key) // Placeholder for the actual implementation
+}
+
+#[allow(dead_code)]
+/// 對輸入的字節數組進行單字節 XOR 解密，返回最佳的 key
+///
+/// 該函數會嘗試所有可能的 key (0x00 到 0xFF)，並計算每個解密結果的得分，
+/// 得分是根據解密後的字節中 ASCII 字母和空格的數量來計算的。
+///
+/// 得分越高的解密結果越可能是正確的。
+/// # Arguments
+/// * `input` - 要解密的字節數組
+/// # Returns
+/// * `Result<u8, Box<dyn Error>>` - 返回最佳的 key
+/// * 如果輸入的字節數組長度小於 2，則返回錯誤
+/// * 如果輸入的字節數組為空，則返回錯誤
+///
+async fn single_byte_xor<T: AsRef<[u8]>>(input: T) -> Result<u8, Box<dyn Error>> {
+    let bytes = input.as_ref();
+    if bytes.is_empty() || bytes.len() < 2 {
+        return Err("Input must be at least 2 bytes long".into());
+    }
+    let mut best_score = 0;
+    let mut best_key = 0;
+    for key in 0..=255 {
+        let decrypted: Vec<u8> = bytes.iter().map(|&byte| byte ^ key).collect();
+        let score = decrypted
+            .iter()
+            .filter(|&&c| c.is_ascii_alphabetic() || c.is_ascii_whitespace())
+            .count();
+        if score > best_score {
+            best_score = score;
+            best_key = key;
+        }
+    }
+    Ok(best_key)
+}
+
+/// 將明文與重複的密鑰進行 XOR 操作，返回加密後的字節數組
+///
+/// 該函數會將明文的每個字節與密鑰的對應字節進行 XOR 操作，密鑰會循環使用。
+/// # Arguments
+/// * `plaintext` - 要加密的明文字節數組
+/// * `key` - 用於加密的密鑰字節數組
+///
+/// # Returns
+/// * `Vec<u8>` - 返回加密後的字節數組
+fn repeat_key_xor(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
+    plaintext
+        .iter()
+        .zip(key.iter().cycle())
+        .map(|(p, k)| p ^ k)
+        .collect()
+}
+
+/// 將字節數組轉置為 KEYSIZE 個 block
+///
+/// 每個 block 包含 KEYSIZE 個字節，並且將每個 block 的 index 取出來組成新的 blocks
+///
+/// 例如，對於字節數組 [a, b, c, d, e, f] 和 KEYSIZE = 3，轉置後的結果為 [[a, d], [b, e], [c, f]]
+fn transpose_blocks(bytes: &[u8], keysize: usize) -> Vec<Vec<u8>> {
+    let bytes_blocks = bytes.chunks(keysize).collect::<Vec<&[u8]>>();
+    (0..keysize)
+        .map(|i| {
+            bytes_blocks
+                .iter()
+                .filter_map(|block| block.get(i))
+                .cloned()
+                .collect()
+        })
+        .collect()
+}
+
+#[allow(dead_code)]
+/// 嘗試使用重複的密鑰 XOR 解密字節數組，並返回解密後的字節數組
+///
+/// 這個函數會嘗試不同的 KEYSIZE，計算每個 KEYSIZE 的平均 Hamming 距離，並選擇最佳的 KEYSIZE。
+///
+/// 然後對每個轉置的 block 使用 [single_byte_xor](single_byte_xor) 找出最佳 key，最後將所有 key 組合起來，解密原始數據。
+///
+/// # Arguments
+/// * `bytes` - 要解密的字節數組
+/// * `keysize` - KEYSIZE 的範圍，通常是 2 到 40
+/// # Returns
+/// * `Result<Vec<u8>, Box<dyn Error>>` - 返回解密後的字節數組
+/// * 如果計算 Hamming 距離失敗，則返回錯誤
+/// * 如果 KEYSIZE 範圍無效，則返回錯誤
+async fn break_repeating_key_xor(
+    bytes: &[u8],
+    keysize_range: Range<usize>,
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    let mut keys: Vec<u8> = Vec::new();
+    let mut best_normaolized_distance = f64::MAX;
+    let mut best_keysize = 0;
+    let mut best_transposed_blocks: Vec<Vec<u8>> = Vec::new();
+    for keysize in keysize_range {
+        let mut avg_hamming_distance = 0.0;
+        let bytes_blocks = bytes.chunks(keysize).collect::<Vec<&[u8]>>();
+
+        for i in 0..bytes_blocks.len() {
+            for j in i + 1..bytes_blocks.len() {
+                let a = &bytes_blocks[i];
+                let b = &bytes_blocks[j];
+                if a.len() == b.len() {
+                    avg_hamming_distance += (hamming_distance(a, b)? / keysize) as f64;
+                }
+            }
+        }
+        avg_hamming_distance /= (bytes_blocks.len() * (bytes_blocks.len() - 1)) as f64;
+        if avg_hamming_distance < best_normaolized_distance {
+            best_normaolized_distance = avg_hamming_distance;
+            best_keysize = keysize;
+
+            best_transposed_blocks = transpose_blocks(bytes, keysize);
+        }
+    }
+    println!("Best Keysize: {best_keysize:02x}");
+    println!("Best Normalized Hamming Distance: {best_normaolized_distance:.2}",);
+    // println!("Transposed Blocks: {:?}", best_transposed_blocks);
+    for block in best_transposed_blocks {
+        let key = single_byte_xor(&block).await?;
+        keys.push(key);
+    }
+    let decoded = repeat_key_xor(bytes, &keys);
+    // println!("Keys: {keys:?}");
+    // println!("Recovered Key: {:?}", String::from_utf8_lossy(&keys));
+    // println!(
+    //     "Decoded (as string):\n{}",
+    //     String::from_utf8_lossy(&decoded)
+    // );
+    // 返回解密後的字節數組
+    Ok(decoded)
+}

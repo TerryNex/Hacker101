@@ -1,6 +1,6 @@
-use cipher::BlockCipherEncrypt;
-use rand::{Rng, thread_rng};
 use crate::{cbc_encrypt, pkcs7_pad};
+use cipher::BlockCipherEncrypt;
+use rand::{thread_rng, Rng};
 
 
 /// 生成 16 個隨機字節作為 AES 密鑰
@@ -91,6 +91,7 @@ fn detect_ecb_mode(ciphertext: &[u8]) -> bool {
 mod oracle_tests {
     use super::*;
 
+
     #[test]
     fn test_ecb_cbc_detection_oracle() {
         let mut correct_detections = 0;
@@ -118,11 +119,19 @@ mod oracle_tests {
         }
 
         let accuracy = correct_detections as f64 / total_tests as f64;
-        println!("Detection accuracy: {:.2}% ({}/{})",
-                 accuracy * 100.0, correct_detections, total_tests);
+        println!(
+            "Detection accuracy: {:.2}% ({}/{})",
+            accuracy * 100.0,
+            correct_detections,
+            total_tests
+        );
 
         // 準確率應該很高（通常 > 95%）
-        assert!(accuracy > 0.8, "Detection accuracy too low: {:.2}%", accuracy * 100.0);
+        assert!(
+            accuracy > 0.8,
+            "Detection accuracy too low: {:.2}%",
+            accuracy * 100.0
+        );
     }
 
     #[test]
