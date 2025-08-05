@@ -1,3 +1,5 @@
+//! Follow the challenge 2 of [cryptopals](https://cryptopals.com/sets/2)
+//! to test the following ordered functions
 use base64::engine::general_purpose::STANDARD as engine;
 use cipher::{BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
 use std::collections::HashSet;
