@@ -1,5 +1,30 @@
 //! Follow the challenge 2 of [cryptopals](https://cryptopals.com/sets/2)
 //! to test the following ordered functions
+//! Let's use a concrete example with block_size = 4 to explain, using characters:
+//! Suppose the unknown string we want to crack is "test" (4 bytes).
+//! 1. First, we get the target ciphertext by encrypting an empty input:
+//!    - encrypt("", key) → ciphertext: ABCD (this is the ciphertext of the unknown string "test")
+//! 2. When cracking the 1st byte (pos=0):
+//!    - pos % 4 = 0 → input_len = 4-1-0 = 3 → we use 3 A's as input
+//!    - encrypt("AAA", key) → ciphertext: WXYZ (this is the ciphertext of "AAA" + 1st byte of unknown string)
+//! We then build a dictionary by testing all possible bytes (0-255) appended to "AAA":
+//!    - encrypt("AAA\x74", key) → ciphertext: WXYZ (where \x74 is 't' in ASCII)
+//!    - encrypt("AAA\x00", key) → ciphertext: EFGH
+//!    - encrypt("AAA\x01", key) → ciphertext: IJKL
+//! ... (all other possible bytes)
+//! Since "AAA\x74" produces the same ciphertext WXYZ as "AAA" + unknown byte, we know the 1st byte is `\x74` ('t').
+//! 3. When cracking the 2nd byte (pos=1):
+//!    - pos % 4 = 1 → input_len = 4-1-1 = 2 → we use 2 A's as input
+//!    - encrypt("AA", key) → ciphertext: QRST (this is the ciphertext of "AA" + "t" + 2nd byte of unknown string)
+//! We build a new dictionary with "AA" + known "t" + test bytes:
+//!    - encrypt("AAt\x65", key) → ciphertext: QRST (where \x65 is 'e')
+//!    - encrypt("AAt\x00", key) → ciphertext: UVWX
+//! ...
+//! Match found with \x65 ('e'), so 2nd byte is 'e'.
+//! 4. This pattern continues:
+//!    - For 3rd byte (pos=2): use 1 A → "A" + "te" + test byte
+//!    - For 4th byte (pos=3): use 0 A's → "tes" + test byte
+//! Each time, we compare the ciphertext of our input (with A's padding) to the ciphertexts in our test dictionary, finding the matching byte that reveals the next character of the unknown string.
 use base64::engine::general_purpose::STANDARD as engine;
 use cipher::{BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
 use std::collections::HashSet;
@@ -29,18 +54,18 @@ mod tests_crypto_challenge_2 {
 
     #[test]
     /// 1. 確定區塊大小（Block Size）：
-    /// - 輸入越來越長的相同字符（例如 "A"、"AA"、"AAA" 等），觀察加密後的密文長度變化。
-    /// - 當密文長度突然增加 16 字節時，說明區塊大小是 16 字節（AES-128 的標準區塊大小）。
+    /// - 輸入越來越長的相同字符（例如 "A"、"AA"、"AAA" 等），觀察加密後的ciphertext長度變化。
+    /// - 當ciphertext長度突然增加 16 字節時，說明區塊大小是 16 字節（AES-128 的標準區塊大小）。
     /// 2. 確認 ECB 模式：
-    /// - 輸入 32 個相同字符（例如 32 個 "A"），檢查密文的前兩個 16 字節區塊是否相同。
-    /// - 如果相同，證明是 ECB 模式，因為 ECB 對相同的明文區塊總是產生相同的密文區塊。
+    /// - 輸入 32 個相同字符（例如 32 個 "A"），檢查ciphertext的前兩個 16 字節區塊是否相同。
+    /// - 如果相同，證明是 ECB 模式，因為 ECB 對相同的明文區塊總是產生相同的ciphertext區塊。
     /// 3. 構造一個少一字節的輸入：
     /// - 假設區塊大小是 16 字節，輸入 15 個 "A"，這樣加密的第一個 16 字節區塊會是 AAAAAAAAAAAAAAA || X，其中 X 是 unknown-string 的第一個字節。
     /// 4. 建立字典：
     /// - 構造 256 個輸入，形式為 AAAAAAAAAAAAAAA || b，其中 b 是從 0x00 到 0xFF 的每個可能字節。
-    /// - 將這些輸入送入 oracle，記錄每個輸入對應的第一個 16 字節密文區塊，形成一個字典 {密文: b}。
+    /// - 將這些輸入送入 oracle，記錄每個輸入對應的第一個 16 字節ciphertext區塊，形成一個字典 {ciphertext: b}。
     /// 5. 匹配第一個字節：
-    /// - 將第 3 步的密文與字典比較，找到匹配的密文，從而得知 X 是哪個字節。
+    /// - 將第 3 步的ciphertext與字典比較，找到匹配的ciphertext，從而得知 X 是哪個字節。
     /// 6. 重複破解下一個字節：
     /// - 知道第一個字節 X 後，輸入 14 個 "A" 加上 X（即 AAAAAAAAAAAAAAX），讓第一個區塊變成 AAAAAAAAAAAAAAX || Y，其中 Y 是第二個字節。
     /// - 重複第 4、5 步，構造新字典，找出 Y，依此類推，直到解出整個 unknown-string。
@@ -62,7 +87,7 @@ mod tests_crypto_challenge_2 {
         println!("is ECB mode: {}", super::ecb_cbc_detection(&encrypted));
 
         // 測試加密的長度 32 個相同字節
-        // 會出現重複的密文塊
+        // 會出現重複的ciphertext塊
         // [228, 64, 133, 250, 43, 218, 51, 216, 106, 163, 64, 180, 193, 108, 5, 173,
         // 228, 64, 133, 250, 43, 218, 51, 216, 106, 163, 64, 180, 193, 108, 5, 173, 96, 250, 54, 112, 126, 69, 244, 153, 219, 160, 242, 91, 146, 35, 1, 165]
         let test_plaintext = super::pkcs7_pad(b"AAAAAAAAAAAAAAA", 16);
@@ -118,7 +143,7 @@ mod tests_crypto_challenge_2 {
                 String::from_utf8_lossy(&xored)
             );
 
-            prev = block.to_vec(); // 這裡要設為密文，而不是明文
+            prev = block.to_vec(); // 這裡要設為ciphertext，而不是明文
             plaintext.extend_from_slice(&xored);
         }
         println!("Decrypted Block: {:?}", plaintext);
@@ -293,7 +318,7 @@ mod tests_crypto_challenge_2 {
             // println!("Target block: {:?}", target_block);
             // 構造目標輸入：input
             let target_input = vec![b'A'; input_len];
-            // 獲取目標密文的對應塊
+            // 獲取目標ciphertext的對應塊
             let target_encrypted = encrypt(&target_input, key);
             let target_block_start = block_idx * block_size;
             let target_block_end = (block_idx + 1) * block_size;
