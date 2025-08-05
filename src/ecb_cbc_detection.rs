@@ -1,8 +1,12 @@
-use crate::{cbc_encrypt, pkcs7_pad};
+//! This module implements an encryption oracle that randomly chooses between
+//! ECB and CBC modes for AES encryption.
+
+
+use crate::challenge_2::{cbc_encrypt, pkcs7_pad};
 use cipher::BlockCipherEncrypt;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 
-
+#[allow(unused)]
 /// 生成 16 個隨機字節作為 AES 密鑰
 fn generate_random_aes_key() -> [u8; 16] {
     let mut rng = rand::rng();
@@ -12,6 +16,7 @@ fn generate_random_aes_key() -> [u8; 16] {
 }
 
 /// 加密預言機 - 隨機選擇 ECB 或 CBC 模式加密
+#[allow(unused)]
 fn encryption_oracle(input: &[u8]) -> (Vec<u8>, bool) {
     let mut rng = rand::rng();
     // 生成隨機密鑰
@@ -23,7 +28,7 @@ fn encryption_oracle(input: &[u8]) -> (Vec<u8>, bool) {
     rng.fill(&mut prefix[..]);
 
     // 在後面添加 5-10 個隨機字節
-    let suffix_len = rng.gen_range(5..=10);
+    let suffix_len = rng.random_range(5..=10);
     let mut suffix = vec![0u8; suffix_len];
     rng.fill(&mut suffix[..]);
 
@@ -68,6 +73,7 @@ fn ecb_encrypt_all(data: &[u8], key: &[u8]) -> Vec<u8> {
 }
 
 /// 檢測加密模式 - 返回 true 如果是 ECB，false 如果是 CBC
+#[allow(unused)]
 fn detect_ecb_mode(ciphertext: &[u8]) -> bool {
     use std::collections::HashSet;
 
@@ -90,7 +96,6 @@ fn detect_ecb_mode(ciphertext: &[u8]) -> bool {
 #[cfg(test)]
 mod oracle_tests {
     use super::*;
-
 
     #[test]
     fn test_ecb_cbc_detection_oracle() {

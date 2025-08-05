@@ -334,7 +334,7 @@ mod tests_crypto_challenge_2 {
     }
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 /// BLOCK_SIZE=16
 fn ecb_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     assert_eq!(block.len(), 16, "Block must be exactly 16 bytes for AES");
@@ -352,7 +352,7 @@ fn ecb_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
 
     block_copy
 }
-#[allow(dead_code)]
+#[allow(unused)]
 pub fn ecb_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     let mut encrypted = Vec::new();
     for block in data.chunks(16) {
@@ -365,7 +365,7 @@ pub fn ecb_encrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     }
     encrypted
 }
-#[allow(dead_code)]
+#[allow(unused)]
 pub fn ecb_encrypt_unknown_string(data: &[u8], key: &[u8]) -> Vec<u8> {
     let unknown_string = base64::Engine::decode(
         &engine,
@@ -384,7 +384,7 @@ pub fn ecb_encrypt_unknown_string(data: &[u8], key: &[u8]) -> Vec<u8> {
     encrypted
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 /// BLOCK_SIZE=16
 pub fn ecb_decrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     let cipher = aes::Aes128Dec::new_from_slice(key).expect("Failed to create cipher");
@@ -400,7 +400,7 @@ pub fn ecb_decrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     }
     block_copy
 }
-#[allow(dead_code)]
+#[allow(unused)]
 pub fn ecb_decrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     let mut decrypted = Vec::new();
     for block in data.chunks(16) {
@@ -410,7 +410,7 @@ pub fn ecb_decrypt(data: &[u8], key: &[u8]) -> Vec<u8> {
     decrypted
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 /// 對輸入數據進行 PKCS#7 填充，返回填充後的數據
 pub(crate) fn pkcs7_pad(data: &[u8], block_size: usize) -> Vec<u8> {
     let padding_size = block_size - (data.len() % block_size);
@@ -423,7 +423,7 @@ pub(crate) fn pkcs7_pad(data: &[u8], block_size: usize) -> Vec<u8> {
     padded_data
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 fn pkcs7_unpad(data: &[u8]) -> Vec<u8> {
     if data.is_empty() {
         return Vec::new();
@@ -441,7 +441,7 @@ fn pkcs7_unpad(data: &[u8]) -> Vec<u8> {
     data[..data.len() - padding_size].to_vec()
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 pub fn cbc_decrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     use cipher::KeyInit;
     let cipher = aes::Aes128Dec::new(key[..16].try_into().expect("Key must be 16 bytes"));
@@ -462,7 +462,7 @@ pub fn cbc_encrypt_block(block: &[u8], key: &[u8]) -> Vec<u8> {
     buf.to_vec()
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 pub fn cbc_decrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     let mut decrypted = Vec::new();
     let mut prev_block = iv.to_vec();
@@ -479,7 +479,7 @@ pub fn cbc_decrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     }
     decrypted
 }
-#[allow(dead_code)]
+#[allow(unused)]
 pub fn cbc_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     let mut prev = iv.to_vec();
     let mut buffer_blocks: Vec<u8> = Vec::with_capacity(data.len());
@@ -494,7 +494,7 @@ pub fn cbc_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Vec<u8> {
     // println!("CBC Encrypted Data: {:?}", buffer_blocks);
     buffer_blocks
 }
-#[allow(dead_code)]
+#[allow(unused)]
 /// 檢測 ECB/CBC 模式
 ///
 /// True: ECB

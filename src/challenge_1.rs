@@ -607,7 +607,7 @@ Jk8DCkkcC3hFMQIEC0EbAVIqCFZBO1IdBgZUVA4QTgUWSR4QJwwRTWM="
     }
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 /// 計算兩個字節切片之間的 Hamming 距離, 越小越好.
 /// 對比兩個字節切片，計算它們之間不同位元的數量。`(101^110).count_ones() = 2`
 /// Hamming 距離是指兩個字節切片之間不同位元的數量。
@@ -631,7 +631,7 @@ fn hamming_distance(str1: &[u8], str2: &[u8]) -> Result<usize, &'static str> {
         .sum())
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 async fn single_byte_xor_string(str: String) -> Result<u8, Box<dyn Error>> {
     if str.is_empty() || str.len() < 2 {
         return Err("Input string must be at least 2 characters long".into());
@@ -656,7 +656,7 @@ async fn single_byte_xor_string(str: String) -> Result<u8, Box<dyn Error>> {
     Ok(best_key) // Placeholder for the actual implementation
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 async fn single_byte_xor_u8(str: Vec<u8>) -> Result<u8, Box<dyn Error>> {
     if str.is_empty() || str.len() < 2 {
         return Err("Input string must be at least 2 characters long".into());
@@ -681,7 +681,7 @@ async fn single_byte_xor_u8(str: Vec<u8>) -> Result<u8, Box<dyn Error>> {
     Ok(best_key) // Placeholder for the actual implementation
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 /// 對輸入的字節數組進行單字節 XOR 解密，返回最佳的 key
 ///
 /// 該函數會嘗試所有可能的 key (0x00 到 0xFF)，並計算每個解密結果的得分，
@@ -751,7 +751,7 @@ fn transpose_blocks(bytes: &[u8], keysize: usize) -> Vec<Vec<u8>> {
         .collect()
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 /// 嘗試使用重複的密鑰 XOR 解密字節數組，並返回解密後的字節數組
 ///
 /// 這個函數會嘗試不同的 KEYSIZE，計算每個 KEYSIZE 的平均 Hamming 距離，並選擇最佳的 KEYSIZE。
